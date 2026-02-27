@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+pandas
+numpy
+scipy
+scikit-learn
+plotly
+networkx
+biopython
+jinja2
+python-multipart
