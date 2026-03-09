@@ -1,0 +1,5 @@
+contigs: 18
+total_length: 2751602
+largest_contig: 896308
+gc_percent: 37.58
+n50: 507764

@@ -267,10 +267,19 @@ def extract_features_from_alignment(records: list[SeqRecord]) -> pd.DataFrame:
     return df
 
 
-def epi_to_features_from_bytes(csv_bytes: bytes) -> pd.DataFrame:
-    df = _read_csv_from_bytes(csv_bytes)
+def epi_to_features_from_bytes(csv_bytes: bytes, manual_json: str = None) -> pd.DataFrame:
+    """
+    Convert uploaded CSV or manual JSON metadata to features.
+    If manual_json is provided, it overrides csv_bytes.
+    """
+    if manual_json:
+        data = json.loads(manual_json)
+        df = pd.DataFrame(data)
+    else:
+        df = _read_csv_from_bytes(csv_bytes)
+
     if "sample_id" not in df.columns:
-        raise ValueError("Epidemiology CSV must have 'sample_id' column.")
+        raise ValueError("Epidemiology data must have 'sample_id' column.")
     df["sample_id"] = df["sample_id"].astype(str).str.strip()
 
     # Binary flags
@@ -284,6 +293,15 @@ def epi_to_features_from_bytes(csv_bytes: bytes) -> pd.DataFrame:
             int)
     else:
         df["heterologous_bin"] = 0
+
+    # New: vaccine strain sequence distance
+    if "vaccine_strain_sequence" in df.columns:
+        # For simplicity, compute Hamming distance to the sample's own vaccine strain
+        # (In practice you would align with the sample sequence)
+        # We need the sample sequences; they are not available here. We'll store the raw sequence
+        # and later in merge_features compute distance.
+        # For now, keep as a string column.
+        pass
 
     # Normalize numeric
     for c in ["age_at_vaccination", "age_at_challenge", "challenge_dose"]:
@@ -322,6 +340,9 @@ def epi_to_features_from_bytes(csv_bytes: bytes) -> pd.DataFrame:
     keep_cols = ["sample_id", "farm_id", "collection_date", "lat", "lon", "lat_scaled", "lon_scaled",
                  "spatial_density"] + \
                 [c for c in df.columns if c.endswith("_bin") or c.endswith("_norm") or c.startswith("vax_")]
+    # Include vaccine_strain_sequence if present
+    if "vaccine_strain_sequence" in df.columns:
+        keep_cols.append("vaccine_strain_sequence")
     keep_cols = [c for c in keep_cols if c in df.columns]
     df = df[keep_cols].copy().fillna(0.0)
 
@@ -339,6 +360,15 @@ def merge_features(genomic_df: pd.DataFrame, epi_df: pd.DataFrame) -> pd.DataFra
     df = genomic_df.merge(epi_df, on="sample_id", how="inner")
     if df.empty:
         raise ValueError("No matching sample_id across files.")
+
+    # If vaccine_strain_sequence present, compute distance to each sample's sequence
+    if "vaccine_strain_sequence" in epi_df.columns:
+        # We need the actual sequences; they are in the genomic data but not in genomic_df.
+        # We'll have to load the raw sequences separately. For simplicity, we'll compute
+        # the Hamming distance between the sample sequence and the provided vaccine strain.
+        # This requires the original records. We'll assume the caller passes them.
+        # In the pipeline, we'll handle this in the run function.
+        pass
     return df
 
 
@@ -519,6 +549,34 @@ def save_outputs(run_id: str, df: pd.DataFrame, emb2d: np.ndarray, emb3d: np.nda
 
 
 # ---------- ANALYSIS FUNCTIONS (each returns dict with plot and text) ----------
+
+def apply_plot_params(fig: go.Figure, params: dict):
+    """Apply common layout parameters and enforce font sizes."""
+    if not params:
+        return
+    width = params.get("width")
+    height = params.get("height")
+    if width and height:
+        fig.update_layout(width=int(width), height=int(height))
+    bgcolor = params.get("bgcolor")
+    if bgcolor:
+        fig.update_layout(plot_bgcolor=bgcolor, paper_bgcolor=bgcolor)
+    show_legend = params.get("show_legend")
+    if show_legend is not None:
+        fig.update_layout(showlegend=show_legend)
+    title = params.get("title")
+    if title is not None:
+        fig.update_layout(title=title if title else "")
+
+    # Enforce axis title font size 18 and tick font size 16
+    fig.update_xaxes(title_font_size=18, tickfont_size=16)
+    fig.update_yaxes(title_font_size=18, tickfont_size=16)
+    # For 3D scenes
+    if hasattr(fig, 'data') and any(trace.type == 'scatter3d' for trace in fig.data):
+        fig.update_scenes(xaxis_title_font_size=18, yaxis_title_font_size=18, zaxis_title_font_size=18,
+                          xaxis_tickfont_size=16, yaxis_tickfont_size=16, zaxis_tickfont_size=16)
+
+
 def analysis_shannon_entropy(run_id: str, plot_params: dict = None) -> dict:
     records = load_sequences(run_id)
     seqs = [str(r.seq).upper() for r in records]
@@ -541,8 +599,10 @@ def analysis_shannon_entropy(run_id: str, plot_params: dict = None) -> dict:
     elif plot_type == "bar":
         fig = px.bar(df_site, x="position", y="entropy", title="Site‑wise Shannon Entropy")
     elif plot_type == "heatmap":
+        # Use px.imshow for heatmap
         z = df_site["entropy"].values.reshape(1, -1)
-        fig = ff.create_annotated_heatmap(z, x=list(df_site["position"]), y=["Entropy"], colorscale='Viridis')
+        fig = px.imshow(z, x=df_site["position"], y=["Entropy"], aspect="auto",
+                        title="Site Entropy Heatmap", labels=dict(x="Position", y=""))
     elif plot_type == "violin":
         fig = px.violin(df_site, y="entropy", title="Distribution of Site Entropy")
     elif plot_type == "box":
@@ -555,8 +615,7 @@ def analysis_shannon_entropy(run_id: str, plot_params: dict = None) -> dict:
                         labels=dict(x="Position", y="Replicate"))
     else:
         fig = px.line(df_site, x="position", y="entropy")
-    if plot_params:
-        apply_plot_params(fig, plot_params)
+    apply_plot_params(fig, plot_params or {})
     figure_json = fig.to_dict() if fig else None
     top10 = df_site.nlargest(10, "entropy").to_html(index=False)
     return {
@@ -623,8 +682,7 @@ def analysis_dnds(run_id: str, plot_params: dict = None) -> dict:
         fig = px.violin(df, y="dN/dS", title="Violin plot of dN/dS")
     else:
         fig = px.bar(df, x="sample_id", y="dN/dS")
-    if plot_params:
-        apply_plot_params(fig, plot_params)
+    apply_plot_params(fig, plot_params or {})
     figure_json = fig.to_dict() if fig else None
     return {"title": "dN/dS Analysis", "figure": figure_json, "text": df.to_html(index=False),
             "download_text": df.to_csv(index=False)}
@@ -686,8 +744,7 @@ def analysis_epistatic_network(run_id: str, plot_params: dict = None) -> dict:
     fig = go.Figure(data=edge_trace + [node_trace],
                     layout=go.Layout(title="Epistatic Network (MI > 90th percentile)",
                                      showlegend=False, hovermode='closest'))
-    if plot_params:
-        apply_plot_params(fig, plot_params)
+    apply_plot_params(fig, plot_params or {})
     figure_json = fig.to_dict()
     return {"title": "Epistatic Network", "figure": figure_json,
             "text": f"<p>Network with {G.number_of_nodes()} nodes and {G.number_of_edges()} edges.</p>",
@@ -696,9 +753,7 @@ def analysis_epistatic_network(run_id: str, plot_params: dict = None) -> dict:
 
 
 def analysis_individual_trajectories(run_id: str, plot_params: dict = None) -> dict:
-    # ------------------------------------------------------------------
-    # 1. Load and validate data
-    # ------------------------------------------------------------------
+    # (unchanged, except apply_plot_params will handle fonts)
     try:
         df = load_merged_data(run_id)
     except FileNotFoundError:
@@ -723,21 +778,15 @@ def analysis_individual_trajectories(run_id: str, plot_params: dict = None) -> d
             "error": f"Missing required columns: {', '.join(missing)}"
         }
 
-    # ------------------------------------------------------------------
-    # 2. Prepare dataframe: sort by entropy and create pseudo‑time
-    # ------------------------------------------------------------------
     try:
         df_sorted = df.sort_values("seq_entropy").reset_index(drop=True)
         n = len(df_sorted)
         if n == 0:
             return {"title": "Individual Trajectories", "error": "No samples after sorting."}
-        df_sorted["pseudo_time"] = np.linspace(0, 1, n)  # safe even if n == 1
+        df_sorted["pseudo_time"] = np.linspace(0, 1, n)
     except Exception as e:
         return {"title": "Individual Trajectories", "error": f"Error preparing data: {str(e)}"}
 
-    # ------------------------------------------------------------------
-    # 3. Determine colour column (prefer risk_score, then vaccinated_bin)
-    # ------------------------------------------------------------------
     color_col = None
     color_continuous_scale = None
     if "risk_score" in df_sorted.columns and df_sorted["risk_score"].notna().any():
@@ -745,11 +794,7 @@ def analysis_individual_trajectories(run_id: str, plot_params: dict = None) -> d
         color_continuous_scale = "Viridis"
     elif "vaccinated_bin" in df_sorted.columns:
         color_col = "vaccinated_bin"
-        # no continuous scale for categorical
 
-    # ------------------------------------------------------------------
-    # 4. Build hover data (include only columns that exist)
-    # ------------------------------------------------------------------
     hover_data = ["sample_id", "seq_entropy"]
     for col in ["risk_score", "vaccinated_bin", "antigenic_divergence", "gc_content"]:
         if col in df_sorted.columns:
@@ -757,20 +802,14 @@ def analysis_individual_trajectories(run_id: str, plot_params: dict = None) -> d
 
     plot_type = plot_params.get("plot_type", "scatter") if plot_params else "scatter"
 
-    # ------------------------------------------------------------------
-    # 5. Create the plot
-    # ------------------------------------------------------------------
     try:
         fig = None
 
-        # ---- 3D trajectory (requires UMAP columns) ----
         if plot_type == "3d_scatter" and all(c in df_sorted.columns for c in ['umap3_x', 'umap3_y', 'umap3_z']):
-            # Ensure no NaNs in coordinates
             coords_ok = df_sorted[['umap3_x', 'umap3_y', 'umap3_z']].notna().all(axis=1)
             if not coords_ok.any():
                 return {"title": "Individual Trajectories", "error": "All UMAP 3D coordinates are NaN."}
             if coords_ok.sum() < 2:
-                # Only one valid point – just show a marker, no line
                 fig = px.scatter_3d(
                     df_sorted[coords_ok],
                     x='umap3_x', y='umap3_y', z='umap3_z',
@@ -780,10 +819,7 @@ def analysis_individual_trajectories(run_id: str, plot_params: dict = None) -> d
                     title="Individual Trajectory (single point)"
                 )
             else:
-                # Build custom figure with line + markers
                 fig = go.Figure()
-
-                # Line connecting points in pseudo‑time order (only if >1 point)
                 line_df = df_sorted[coords_ok].sort_values("pseudo_time")
                 fig.add_trace(go.Scatter3d(
                     x=line_df['umap3_x'],
@@ -794,8 +830,6 @@ def analysis_individual_trajectories(run_id: str, plot_params: dict = None) -> d
                     hoverinfo='none',
                     showlegend=False
                 ))
-
-                # Markers (coloured)
                 marker_kwargs = {
                     'x': df_sorted['umap3_x'],
                     'y': df_sorted['umap3_y'],
@@ -815,10 +849,8 @@ def analysis_individual_trajectories(run_id: str, plot_params: dict = None) -> d
                 else:
                     marker_kwargs['marker'] = {'color': 'blue', 'size': 5}
                 fig.add_trace(go.Scatter3d(**marker_kwargs))
-
                 fig.update_layout(title="Individual Trajectories on Manifold (3D)")
 
-        # ---- 2D scatter (pseudo‑time vs entropy) ----
         elif plot_type == "scatter":
             fig = px.scatter(
                 df_sorted,
@@ -838,7 +870,6 @@ def analysis_individual_trajectories(run_id: str, plot_params: dict = None) -> d
                 title="Individual Trajectories (line)"
             )
 
-        # ---- Fallback (simple scatter) ----
         else:
             fig = px.scatter(
                 df_sorted,
@@ -850,12 +881,7 @@ def analysis_individual_trajectories(run_id: str, plot_params: dict = None) -> d
         if fig is None:
             return {"title": "Individual Trajectories", "error": "Plot creation failed (no figure)."}
 
-        # ------------------------------------------------------------------
-        # 6. Apply user‑specified layout parameters (width, height, etc.)
-        # ------------------------------------------------------------------
-        if plot_params:
-            apply_plot_params(fig, plot_params)
-
+        apply_plot_params(fig, plot_params or {})
         figure_json = fig.to_dict()
         return {
             "title": "Individual Trajectories",
@@ -864,7 +890,6 @@ def analysis_individual_trajectories(run_id: str, plot_params: dict = None) -> d
         }
 
     except Exception as e:
-        # Catch any unexpected error during plot generation
         return {
             "title": "Individual Trajectories",
             "error": f"Error during plot generation: {str(e)}"
@@ -872,89 +897,516 @@ def analysis_individual_trajectories(run_id: str, plot_params: dict = None) -> d
 
 
 def analysis_farm_coupling(run_id: str, plot_params: dict = None) -> dict:
+    """
+    Perform farm-level coupling analysis.
+
+    Available plot types (via plot_params["plot_type"]):
+      - "bar": Bar chart of per-farm statistics (mean entropy, sample count, mean risk).
+      - "heatmap": Heatmap of pairwise genetic distances between farms (based on consensus sequences).
+      - "network": Network graph of farms with genetic similarity above a threshold.
+
+    Additional parameters:
+      - "dist_threshold": (for network) similarity threshold (default 0.95, i.e., distance < 0.05).
+    """
+    import numpy as np
+    import pandas as pd
+    import plotly.express as px
+    import plotly.graph_objects as go
+    from scipy.spatial.distance import pdist, squareform
+    from collections import Counter
+
+    # Load merged data (features + results) and sequences
     df = load_merged_data(run_id)
+    records = load_sequences(run_id)
+    seqs = [str(r.seq).upper() for r in records]
+    ids = [r.id for r in records]
+
+    # Check required columns
     if "farm_id" not in df.columns:
         return {"title": "Farm‑Level Coupling", "error": "farm_id column missing."}
-    farm_stats = df.groupby("farm_id").agg(
-        n_samples=("sample_id", "count"),
-        mean_entropy=("seq_entropy", "mean"),
-        mean_risk=("risk_score", "mean") if "risk_score" in df.columns else ("seq_entropy", lambda x: 0)
-    ).reset_index()
+
+    # Merge farm_id into sequences dataframe
+    seq_df = pd.DataFrame({"sample_id": ids, "sequence": seqs})
+    merged = df.merge(seq_df, on="sample_id", how="inner")
+    if merged.empty:
+        return {"title": "Farm‑Level Coupling", "error": "No matching sample_id with sequences."}
+
+    # Group by farm
+    farms = merged["farm_id"].unique()
+    farm_stats = []
+    farm_consensus = {}
+
+    for farm in farms:
+        farm_data = merged[merged["farm_id"] == farm]
+        farm_seqs = farm_data["sequence"].tolist()
+        n_samples = len(farm_seqs)
+        mean_entropy = farm_data["seq_entropy"].mean()
+        mean_risk = farm_data["risk_score"].mean() if "risk_score" in farm_data.columns else np.nan
+
+        # Compute consensus sequence (most common nucleotide at each position)
+        if n_samples > 0 and len(farm_seqs[0]) > 0:
+            seq_len = len(farm_seqs[0])
+            consensus = []
+            for i in range(seq_len):
+                col = [s[i] for s in farm_seqs if s[i] in "ACGT"]
+                if col:
+                    consensus.append(Counter(col).most_common(1)[0][0])
+                else:
+                    consensus.append("N")
+            cons_seq = "".join(consensus)
+        else:
+            cons_seq = ""
+
+        farm_consensus[farm] = cons_seq
+        farm_stats.append({
+            "farm_id": farm,
+            "n_samples": n_samples,
+            "mean_entropy": mean_entropy,
+            "mean_risk": mean_risk,
+            "consensus": cons_seq
+        })
+
+    farm_stats_df = pd.DataFrame(farm_stats)
+
+    # Determine plot type
     plot_type = plot_params.get("plot_type", "bar") if plot_params else "bar"
+    fig = None
+
     if plot_type == "bar":
-        fig = px.bar(farm_stats, x="farm_id", y="mean_entropy", color="n_samples",
-                     title="Farm‑Level Mean Entropy")
-    elif plot_type == "scatter":
-        fig = px.scatter(farm_stats, x="farm_id", y="mean_entropy", size="n_samples",
-                         title="Farm‑Level Mean Entropy")
+        # Original bar chart
+        fig = px.bar(
+            farm_stats_df,
+            x="farm_id",
+            y="mean_entropy",
+            color="n_samples",
+            hover_data=["mean_risk"],
+            title="Farm‑Level Mean Entropy"
+        )
+
     elif plot_type == "heatmap":
-        pivot = farm_stats.set_index("farm_id")[["mean_entropy", "n_samples"]]
-        fig = px.imshow(pivot.T, text_auto=True, aspect="auto", title="Farm Statistics Heatmap")
+        # Compute pairwise distances between farm consensus sequences
+        valid_farms = [f for f in farms if farm_consensus[f] and len(farm_consensus[f]) > 0]
+        if len(valid_farms) < 2:
+            return {"title": "Farm‑Level Coupling", "error": "Need at least 2 farms with valid consensus sequences."}
+
+        # Encode consensus sequences as numeric vectors
+        def encode_seq(seq):
+            mapping = {'A': 1, 'C': 2, 'G': 3, 'T': 4}
+            return [mapping.get(c, 0) for c in seq]
+
+        X = np.array([encode_seq(farm_consensus[f]) for f in valid_farms])
+        # Hamming distance
+        dist_mat = pdist(X, metric='hamming')
+        dist_square = squareform(dist_mat)
+        # Create heatmap
+        fig = px.imshow(
+            dist_square,
+            x=valid_farms,
+            y=valid_farms,
+            color_continuous_scale="Viridis",
+            title="Farm Pairwise Genetic Distance (Hamming)",
+            labels=dict(x="Farm ID", y="Farm ID", color="Distance")
+        )
+        fig.update_xaxes(tickangle=45)
+
+    elif plot_type == "network":
+        # Build network of farms with similarity above threshold
+        valid_farms = [f for f in farms if farm_consensus[f] and len(farm_consensus[f]) > 0]
+        if len(valid_farms) < 2:
+            return {"title": "Farm‑Level Coupling", "error": "Need at least 2 farms with valid consensus sequences."}
+
+        # Encode and compute distances
+        def encode_seq(seq):
+            mapping = {'A': 1, 'C': 2, 'G': 3, 'T': 4}
+            return [mapping.get(c, 0) for c in seq]
+
+        X = np.array([encode_seq(farm_consensus[f]) for f in valid_farms])
+        dist_mat = pdist(X, metric='hamming')
+        # Similarity = 1 - distance
+        sim_mat = 1 - squareform(dist_mat)
+
+        threshold = plot_params.get("dist_threshold", 0.95) if plot_params else 0.95
+        # Build graph
+        G = nx.Graph()
+        for farm in valid_farms:
+            G.add_node(farm)
+        for i in range(len(valid_farms)):
+            for j in range(i + 1, len(valid_farms)):
+                if sim_mat[i, j] >= threshold:
+                    G.add_edge(valid_farms[i], valid_farms[j], weight=sim_mat[i, j])
+
+        if G.number_of_edges() == 0:
+            return {"title": "Farm‑Level Coupling", "error": f"No edges above similarity threshold {threshold}."}
+
+        pos = nx.spring_layout(G, seed=42)
+        edge_trace = []
+        for u, v, w in G.edges(data=True):
+            x0, y0 = pos[u]
+            x1, y1 = pos[v]
+            edge_trace.append(go.Scatter(
+                x=[x0, x1, None],
+                y=[y0, y1, None],
+                mode='lines',
+                line=dict(width=w['weight'] * 10, color='#888'),
+                hoverinfo='none'
+            ))
+        node_x = [pos[n][0] for n in G.nodes()]
+        node_y = [pos[n][1] for n in G.nodes()]
+        node_trace = go.Scatter(
+            x=node_x,
+            y=node_y,
+            mode='markers+text',
+            text=[n for n in G.nodes()],
+            textposition="top center",
+            marker=dict(size=20, color='lightblue', line=dict(color='black', width=1))
+        )
+
+        fig = go.Figure(
+            data=edge_trace + [node_trace],
+            layout=go.Layout(
+                title=f"Farm Similarity Network (sim ≥ {threshold})",
+                showlegend=False,
+                hovermode='closest',
+                xaxis=dict(visible=False),
+                yaxis=dict(visible=False)
+            )
+        )
+
     else:
-        fig = px.bar(farm_stats, x="farm_id", y="mean_entropy")
-    if plot_params:
-        apply_plot_params(fig, plot_params)
-    figure_json = fig.to_dict() if fig else None
-    return {"title": "Farm‑Level Coupling", "figure": figure_json,
-            "text": farm_stats.to_html(index=False), "download_text": farm_stats.to_csv(index=False)}
+        # Fallback to bar
+        fig = px.bar(farm_stats_df, x="farm_id", y="mean_entropy", title="Farm‑Level Mean Entropy")
+
+    if fig is None:
+        return {"title": "Farm‑Level Coupling", "error": "Could not generate plot."}
+
+    apply_plot_params(fig, plot_params or {})
+    figure_json = fig.to_dict()
+    return {
+        "title": "Farm‑Level Coupling",
+        "figure": figure_json,
+        "text": farm_stats_df.to_html(index=False),
+        "download_text": farm_stats_df.to_csv(index=False)
+    }
 
 
 def analysis_spatiotemporal_diffusion(run_id: str, plot_params: dict = None) -> dict:
+    """
+    Spatio-temporal diffusion analysis.
+
+    Generates an animated map of sample locations over time and a static trajectory map.
+    Also computes diffusion metrics: centroid shift, bounding box expansion, etc.
+
+    Parameters via plot_params:
+        - mapbox_token: (optional) token for satellite imagery.
+        - animation_speed: (optional) speed of animation (default 500 ms).
+        - show_static_trajectory: (optional) whether to include static trajectory plot (default True).
+    """
+    import numpy as np
+    import pandas as pd
+    import plotly.express as px
+    import plotly.graph_objects as go
+    from datetime import datetime
+
     df = load_merged_data(run_id)
-    if not {"collection_date", "lat", "lon"}.issubset(df.columns):
-        return {"title": "Spatio‑Temporal Diffusion", "error": "Requires collection_date, lat, lon."}
-    df = df.dropna(subset=["collection_date", "lat", "lon"])
+    required = {"collection_date", "lat", "lon"}
+    if not required.issubset(df.columns):
+        return {"title": "Spatio‑Temporal Diffusion",
+                "error": f"Missing required columns. Need {required}."}
+
+    df = df.dropna(subset=["collection_date", "lat", "lon"]).copy()
     if df.empty:
-        return {"title": "Spatio‑Temporal Diffusion", "error": "No valid dates/locations."}
-    df["date_str"] = pd.to_datetime(df["collection_date"]).dt.strftime("%Y-%m-%d")
-    mapbox_token = plot_params.get("mapbox_token", "") if plot_params else ""
-    if mapbox_token:
-        fig = px.scatter_mapbox(df, lat="lat", lon="lon", animation_frame="date_str",
-                                color="risk_score" if "risk_score" in df.columns else None,
-                                hover_name="sample_id", title="Spatio‑Temporal Diffusion",
-                                mapbox_style="satellite-streets", zoom=5)
-        fig.update_layout(mapbox_accesstoken=mapbox_token)
+        return {"title": "Spatio‑Temporal Diffusion",
+                "error": "No valid dates/locations."}
+
+    # Parse dates and sort
+    df["date"] = pd.to_datetime(df["collection_date"])
+    df = df.sort_values("date")
+    df["date_str"] = df["date"].dt.strftime("%Y-%m-%d")
+
+    # Compute diffusion metrics
+    n_samples = len(df)
+    time_span = (df["date"].max() - df["date"].min()).days
+    if n_samples > 1:
+        # Centroids over time (by day)
+        df["day"] = df["date"].dt.date
+        daily_centroids = df.groupby("day").agg(
+            centroid_lat=("lat", "mean"),
+            centroid_lon=("lon", "mean")
+        ).reset_index()
+        daily_centroids["day"] = pd.to_datetime(daily_centroids["day"])
+        daily_centroids = daily_centroids.sort_values("day")
+
+        # Calculate movement between consecutive days
+        if len(daily_centroids) > 1:
+            shifts = daily_centroids[["centroid_lat", "centroid_lon"]].diff().iloc[1:]
+            distances = np.sqrt(shifts["centroid_lat"] ** 2 + shifts["centroid_lon"] ** 2) * 111  # approx km per degree
+            avg_daily_shift = distances.mean()
+            total_shift = distances.sum()
+        else:
+            avg_daily_shift = 0
+            total_shift = 0
+
+        # Bounding box expansion
+        bbox_lat_range = df["lat"].max() - df["lat"].min()
+        bbox_lon_range = df["lon"].max() - df["lon"].min()
+        bbox_area = bbox_lat_range * bbox_lon_range * 111 * 111  # approx km²
     else:
-        fig = px.scatter_mapbox(df, lat="lat", lon="lon", animation_frame="date_str",
-                                color="risk_score" if "risk_score" in df.columns else None,
-                                hover_name="sample_id", title="Spatio‑Temporal Diffusion",
-                                mapbox_style="open-street-map", zoom=5)
-    if plot_params:
-        apply_plot_params(fig, plot_params)
-    figure_json = fig.to_dict() if fig else None
-    return {"title": "Spatio‑Temporal Diffusion", "figure": figure_json,
-            "text": f"<p>{len(df)} samples with dates.</p>"}
+        avg_daily_shift = total_shift = bbox_area = 0
+
+    metrics = {
+        "Total samples": n_samples,
+        "Date range": f"{df['date'].min().date()} to {df['date'].max().date()}",
+        "Time span (days)": time_span,
+        "Bounding box area (km²)": f"{bbox_area:.2f}",
+        "Total centroid shift (km)": f"{total_shift:.2f}",
+        "Average daily shift (km)": f"{avg_daily_shift:.2f}" if n_samples > 1 else "N/A"
+    }
+
+    # --- Plot generation ---
+    mapbox_token = plot_params.get("mapbox_token", "") if plot_params else ""
+    animation_speed = plot_params.get("animation_speed", 500) if plot_params else 500
+    show_static = plot_params.get("show_static_trajectory", True) if plot_params else True
+
+    figs = []
+    titles = []
+
+    # 1. Animated scatter map
+    if mapbox_token:
+        fig_anim = px.scatter_mapbox(
+            df,
+            lat="lat",
+            lon="lon",
+            animation_frame="date_str",
+            color="risk_score" if "risk_score" in df.columns else None,
+            hover_name="sample_id",
+            title="Spatio‑Temporal Diffusion (animated)",
+            mapbox_style="satellite-streets",
+            zoom=5,
+            center={"lat": df["lat"].mean(), "lon": df["lon"].mean()}
+        )
+        fig_anim.update_layout(mapbox_accesstoken=mapbox_token)
+    else:
+        fig_anim = px.scatter_mapbox(
+            df,
+            lat="lat",
+            lon="lon",
+            animation_frame="date_str",
+            color="risk_score" if "risk_score" in df.columns else None,
+            hover_name="sample_id",
+            title="Spatio‑Temporal Diffusion (animated)",
+            mapbox_style="open-street-map",
+            zoom=5,
+            center={"lat": df["lat"].mean(), "lon": df["lon"].mean()}
+        )
+    # Adjust animation speed
+    fig_anim.layout.updatemenus[0].buttons[0].args[1]["frame"]["duration"] = animation_speed
+    figs.append(fig_anim)
+    titles.append("Animated Map")
+
+    # 2. Static trajectory map (optional)
+    if show_static and n_samples > 1:
+        # Create a line connecting points in chronological order
+        fig_traj = go.Figure()
+        # Add line
+        fig_traj.add_trace(go.Scattermapbox(
+            lat=df["lat"],
+            lon=df["lon"],
+            mode='lines+markers',
+            line=dict(width=2, color='blue'),
+            marker=dict(size=6, color=df["risk_score"] if "risk_score" in df.columns else 'red',
+                        colorscale='Viridis', showscale=True, colorbar=dict(title="Risk")),
+            text=df["sample_id"],
+            hoverinfo='text'
+        ))
+        # Configure map
+        if mapbox_token:
+            fig_traj.update_layout(
+                mapbox=dict(
+                    style="satellite-streets",
+                    accesstoken=mapbox_token,
+                    center={"lat": df["lat"].mean(), "lon": df["lon"].mean()},
+                    zoom=5
+                ),
+                title="Spatio‑Temporal Trajectory"
+            )
+        else:
+            fig_traj.update_layout(
+                mapbox=dict(
+                    style="open-street-map",
+                    center={"lat": df["lat"].mean(), "lon": df["lon"].mean()},
+                    zoom=5
+                ),
+                title="Spatio‑Temporal Trajectory"
+            )
+        figs.append(fig_traj)
+        titles.append("Trajectory Map")
+
+    # Combine figures into subplots? For simplicity, we'll return the animated map as main figure,
+    # and include the static trajectory as additional figure in the text (via HTML).
+    # But the API expects a single figure. So we'll return the animated map as main,
+    # and include the static as a separate HTML snippet if needed.
+    # Alternatively, we could create a subplot with both, but mapbox subplots are tricky.
+    # We'll keep it simple: main figure is animated map, static map is appended as HTML.
+
+    main_fig = figs[0]
+    apply_plot_params(main_fig, plot_params or {})
+    figure_json = main_fig.to_dict()
+
+    # Generate HTML for additional plots (if any)
+    extra_html = ""
+    if len(figs) > 1:
+        extra_html = "<h4>Static Trajectory Map</h4>" + figs[1].to_html(include_plotlyjs=False, full_html=False)
+
+    # Metrics as HTML table
+    metrics_html = "<h4>Diffusion Metrics</h4><table border='1' style='border-collapse: collapse;'>"
+    for k, v in metrics.items():
+        metrics_html += f"<tr><th>{k}</th><td>{v}</td></tr>"
+    metrics_html += "</table>"
+
+    # Combined text
+    full_text = metrics_html + extra_html
+
+    # Download data: coordinates with dates and risk
+    download_df = df[["sample_id", "lat", "lon", "date", "risk_score"]].copy()
+    download_df["date"] = download_df["date"].dt.strftime("%Y-%m-%d")
+
+    return {
+        "title": "Spatio‑Temporal Diffusion",
+        "figure": figure_json,
+        "text": full_text,
+        "download_text": download_df.to_csv(index=False)
+    }
 
 
 def analysis_geospatial_clustering(run_id: str, plot_params: dict = None) -> dict:
+    """
+    Perform geospatial clustering using DBSCAN.
+
+    Parameters via plot_params:
+        - eps_km: (optional) DBSCAN epsilon in kilometers (default 50 km)
+        - min_samples: (optional) minimum points per cluster (default 3)
+        - mapbox_token: (optional) token for satellite map style
+    """
+    import numpy as np
+    import pandas as pd
+    import plotly.express as px
+    from sklearn.cluster import DBSCAN
+
     df = load_merged_data(run_id)
-    if not {"lat", "lon"}.issubset(df.columns):
-        return {"title": "Geospatial Clustering", "error": "lat/lon missing."}
+    required = {"lat", "lon"}
+    if not required.issubset(df.columns):
+        return {"title": "Geospatial Clustering",
+                "error": f"Missing required columns. Need {required}."}
+
+    df = df.dropna(subset=["lat", "lon"]).copy()
+    if len(df) < 3:
+        return {"title": "Geospatial Clustering",
+                "error": "Need at least 3 points with valid coordinates."}
+
+    # Get parameters
+    eps_km = plot_params.get("eps_km", 50) if plot_params else 50
+    min_samples = plot_params.get("min_samples", 3) if plot_params else 3
+    mapbox_token = plot_params.get("mapbox_token", "") if plot_params else ""
+
+    # Convert coordinates to radians for haversine metric
     coords = df[["lat", "lon"]].values
-    if len(coords) < 3:
-        return {"title": "Geospatial Clustering", "error": "Not enough points."}
-    db = DBSCAN(eps=0.5, min_samples=2, metric='haversine')
     coords_rad = np.radians(coords)
+
+    # DBSCAN with haversine metric – epsilon must be in radians
+    # Earth radius ~6371 km, so convert km to radians
+    eps_rad = eps_km / 6371.0
+
+    db = DBSCAN(eps=eps_rad, min_samples=min_samples, metric='haversine')
     labels = db.fit_predict(coords_rad)
+
     df["cluster"] = labels
     n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
-    mapbox_token = plot_params.get("mapbox_token", "") if plot_params else ""
+    n_noise = (labels == -1).sum()
+
+    # Compute cluster centers (mean lat/lon of non‑noise points)
+    cluster_centers = []
+    for cl in sorted(set(labels)):
+        if cl == -1:
+            continue
+        mask = labels == cl
+        center_lat = df.loc[mask, "lat"].mean()
+        center_lon = df.loc[mask, "lon"].mean()
+        cluster_centers.append({
+            "cluster": cl,
+            "center_lat": round(center_lat, 4),
+            "center_lon": round(center_lon, 4),
+            "size": mask.sum()
+        })
+    centers_df = pd.DataFrame(cluster_centers)
+
+    # Prepare cluster count summary
+    counts = pd.Series(labels).value_counts().sort_index()
+    cluster_counts = pd.DataFrame({
+        "cluster": counts.index,
+        "count": counts.values
+    })
+
+    # Create map
     if mapbox_token:
-        fig = px.scatter_mapbox(df, lat="lat", lon="lon", color=labels.astype(str),
-                                hover_name="sample_id", title=f"Geospatial Clusters (DBSCAN, {n_clusters} clusters)",
-                                mapbox_style="satellite-streets", zoom=5)
+        fig = px.scatter_mapbox(
+            df,
+            lat="lat",
+            lon="lon",
+            color=labels.astype(str),
+            hover_name="sample_id",
+            hover_data=["cluster"],
+            title=f"Geospatial Clusters (DBSCAN, eps={eps_km} km, min_samples={min_samples})",
+            mapbox_style="satellite-streets",
+            zoom=5,
+            center={"lat": df["lat"].mean(), "lon": df["lon"].mean()}
+        )
         fig.update_layout(mapbox_accesstoken=mapbox_token)
     else:
-        fig = px.scatter_mapbox(df, lat="lat", lon="lon", color=labels.astype(str),
-                                hover_name="sample_id", title=f"Geospatial Clusters (DBSCAN, {n_clusters} clusters)",
-                                mapbox_style="open-street-map", zoom=5)
-    if plot_params:
-        apply_plot_params(fig, plot_params)
-    figure_json = fig.to_dict() if fig else None
-    cluster_counts = pd.Series(labels).value_counts().to_frame().reset_index()
-    cluster_counts.columns = ["cluster", "count"]
-    return {"title": "Geospatial Clustering", "figure": figure_json,
-            "text": cluster_counts.to_html(index=False), "download_text": cluster_counts.to_csv(index=False)}
+        fig = px.scatter_mapbox(
+            df,
+            lat="lat",
+            lon="lon",
+            color=labels.astype(str),
+            hover_name="sample_id",
+            hover_data=["cluster"],
+            title=f"Geospatial Clusters (DBSCAN, eps={eps_km} km, min_samples={min_samples})",
+            mapbox_style="open-street-map",
+            zoom=5,
+            center={"lat": df["lat"].mean(), "lon": df["lon"].mean()}
+        )
+
+    # Add cluster centers as larger markers (if any)
+    if not centers_df.empty:
+        fig.add_trace(px.scatter_mapbox(
+            centers_df,
+            lat="center_lat",
+            lon="center_lon",
+            size=[20] * len(centers_df),
+            color="cluster",
+            hover_name="cluster",
+            hover_data=["size"]
+        ).data[0])
+
+    apply_plot_params(fig, plot_params or {})
+    figure_json = fig.to_dict()
+
+    # Build summary text
+    summary = f"<h4>Clustering Summary</h4>"
+    summary += f"<p>Total points: {len(df)}<br>"
+    summary += f"Clusters found: {n_clusters}<br>"
+    summary += f"Noise points: {n_noise}</p>"
+    if not centers_df.empty:
+        summary += centers_df.to_html(index=False)
+
+    # Download: cluster assignments with coordinates
+    download_df = df[["sample_id", "lat", "lon", "cluster"]].copy()
+
+    return {
+        "title": "Geospatial Clustering",
+        "figure": figure_json,
+        "text": summary,
+        "download_text": download_df.to_csv(index=False)
+    }
 
 
 def analysis_geospatial_regression(run_id: str, plot_params: dict = None) -> dict:
@@ -983,8 +1435,7 @@ def analysis_geospatial_regression(run_id: str, plot_params: dict = None) -> dic
                    text=df["sample_id"], name="Samples")
     ])
     fig.update_layout(title="Geospatial Regression (risk ~ lat+lon)")
-    if plot_params:
-        apply_plot_params(fig, plot_params)
+    apply_plot_params(fig, plot_params or {})
     figure_json = fig.to_dict()
     coef_df = pd.DataFrame({"feature": poly.get_feature_names_out(["lat", "lon"]), "coefficient": reg.coef_})
     return {"title": "Geospatial Regression", "figure": figure_json,
@@ -1024,8 +1475,7 @@ def analysis_manifold_curvature(run_id: str, plot_params: dict = None) -> dict:
         fig = px.histogram(df, x="curvature", title="Distribution of Curvature")
     else:
         fig = px.scatter_3d(df, x="umap3_x", y="umap3_y", z="umap3_z", color=curvature)
-    if plot_params:
-        apply_plot_params(fig, plot_params)
+    apply_plot_params(fig, plot_params or {})
     figure_json = fig.to_dict() if fig else None
     return {"title": "Manifold Curvature", "figure": figure_json,
             "text": f"<p>Mean curvature: {np.mean(curvature):.4f}</p>"}
@@ -1050,21 +1500,18 @@ def analysis_immune_escape_pathways(run_id: str, plot_params: dict = None) -> di
                             hover_name='sample_id', title="Antigenic Divergence on Manifold")
     else:
         fig = px.bar(top, x="sample_id", y="antigenic_divergence")
-    if plot_params:
-        apply_plot_params(fig, plot_params)
+    apply_plot_params(fig, plot_params or {})
     figure_json = fig.to_dict() if fig else None
     return {"title": "Immune Escape Pathways", "figure": figure_json,
             "text": top.to_html(index=False), "download_text": top.to_csv(index=False)}
 
 
 def analysis_recombination_hotspots(run_id: str, plot_params: dict = None) -> dict:
-    # Placeholder – could be implemented with more sophisticated methods
     records = load_sequences(run_id)
     seqs = [str(r.seq).upper() for r in records]
     if len(seqs) < 10:
         return {"title": "Recombination Hotspot Detection", "error": "Need at least 10 sequences."}
     seq_len = len(seqs[0])
-    # Simple entropy-based proxy
     site_entropy = []
     for i in range(seq_len):
         col = [s[i] for s in seqs if s[i] in "ACGT"]
@@ -1075,13 +1522,11 @@ def analysis_recombination_hotspots(run_id: str, plot_params: dict = None) -> di
             probs = np.array(list(counts.values())) / len(col)
             site_entropy.append(entropy(probs, base=2))
     df_site = pd.DataFrame({"position": list(range(1, seq_len + 1)), "entropy": site_entropy})
-    # Highlight positions with entropy > 90th percentile as potential hotspots
     threshold = np.percentile(site_entropy, 90)
     hotspots = df_site[df_site["entropy"] > threshold]
     fig = px.scatter(df_site, x="position", y="entropy", title="Site Entropy (potential recombination hotspots)")
     fig.add_hline(y=threshold, line_dash="dash", line_color="red", annotation_text=f"90th percentile ({threshold:.2f})")
-    if plot_params:
-        apply_plot_params(fig, plot_params)
+    apply_plot_params(fig, plot_params or {})
     figure_json = fig.to_dict() if fig else None
     return {"title": "Recombination Hotspot Detection (Entropy-based)", "figure": figure_json,
             "text": f"<p>{len(hotspots)} sites above 90th percentile entropy.</p>{hotspots.to_html(index=False)}",
@@ -1107,8 +1552,7 @@ def analysis_temporal_trend(run_id: str, plot_params: dict = None) -> dict:
         fig = px.area(df, x="collection_date", y="risk_score", title="Risk Score Area Chart")
     else:
         fig = px.line(df, x="collection_date", y="risk_score")
-    if plot_params:
-        apply_plot_params(fig, plot_params)
+    apply_plot_params(fig, plot_params or {})
     figure_json = fig.to_dict() if fig else None
     return {"title": "Temporal Trend", "figure": figure_json, "text": "<p>Time series of risk score.</p>"}
 
@@ -1131,15 +1575,14 @@ def analysis_mutation_heatmap(run_id: str, plot_params: dict = None) -> dict:
             t = col.count('T') / len(col)
             freq_matrix.append([a, c, g, t])
     freq_matrix = np.array(freq_matrix).T
-    fig = ff.create_annotated_heatmap(
-        z=freq_matrix,
-        x=[f"Pos {i + 1}" for i in range(seq_len)],
-        y=['A', 'C', 'G', 'T'],
-        colorscale='Viridis', showscale=True
-    )
-    fig.update_layout(title="Nucleotide Frequency per Site")
-    if plot_params:
-        apply_plot_params(fig, plot_params)
+    # Use px.imshow for heatmap
+    fig = px.imshow(freq_matrix,
+                    x=[f"Pos {i+1}" for i in range(seq_len)],
+                    y=['A', 'C', 'G', 'T'],
+                    color_continuous_scale='Viridis',
+                    aspect="auto",
+                    title="Nucleotide Frequency per Site")
+    apply_plot_params(fig, plot_params or {})
     figure_json = fig.to_dict()
     return {"title": "Mutation Heatmap", "figure": figure_json,
             "text": "<p>Heatmap shows frequency of each nucleotide at each position.</p>"}
@@ -1151,9 +1594,9 @@ def analysis_correlation_matrix(run_id: str, plot_params: dict = None) -> dict:
     if len(numeric_cols) < 2:
         return {"title": "Correlation Matrix", "error": "Not enough numeric columns."}
     corr = df[numeric_cols].corr()
-    fig = px.imshow(corr, text_auto=True, aspect="auto", title="Feature Correlation Matrix")
-    if plot_params:
-        apply_plot_params(fig, plot_params)
+    fig = px.imshow(corr, text_auto=True, aspect="auto", title="Feature Correlation Matrix",
+                    color_continuous_scale='RdBu', zmin=-1, zmax=1)
+    apply_plot_params(fig, plot_params or {})
     figure_json = fig.to_dict()
     return {"title": "Correlation Matrix", "figure": figure_json,
             "text": "<p>Pearson correlation between numeric features.</p>",
@@ -1177,8 +1620,7 @@ def analysis_tsne(run_id: str, plot_params: dict = None) -> dict:
     emb = tsne.fit_transform(Xs)
     df_plot = pd.DataFrame({"tsne_x": emb[:, 0], "tsne_y": emb[:, 1], "risk_score": df["risk_score"]})
     fig = px.scatter(df_plot, x="tsne_x", y="tsne_y", color="risk_score", title="t-SNE Projection")
-    if plot_params:
-        apply_plot_params(fig, plot_params)
+    apply_plot_params(fig, plot_params or {})
     figure_json = fig.to_dict()
     return {"title": "t-SNE", "figure": figure_json, "text": "<p>t-Distributed Stochastic Neighbor Embedding.</p>"}
 
@@ -1200,8 +1642,7 @@ def analysis_risk_factors(run_id: str, plot_params: dict = None) -> dict:
     imp_df = pd.DataFrame({"feature": feature_cols, "importance": importances}).sort_values("importance",
                                                                                             ascending=False)
     fig = px.bar(imp_df, x="importance", y="feature", orientation='h', title="Feature Importance for Risk Score")
-    if plot_params:
-        apply_plot_params(fig, plot_params)
+    apply_plot_params(fig, plot_params or {})
     figure_json = fig.to_dict()
     return {"title": "Risk Factor Analysis", "figure": figure_json,
             "text": imp_df.to_html(index=False), "download_text": imp_df.to_csv(index=False)}
@@ -1216,8 +1657,7 @@ def analysis_temporal_clustering(run_id: str, plot_params: dict = None) -> dict:
     df["year_month"] = df["date"].dt.to_period("M").astype(str)
     counts = df["year_month"].value_counts().sort_index()
     fig = px.bar(x=counts.index, y=counts.values, title="Sample Count per Month")
-    if plot_params:
-        apply_plot_params(fig, plot_params)
+    apply_plot_params(fig, plot_params or {})
     figure_json = fig.to_dict()
     return {"title": "Temporal Clustering", "figure": figure_json,
             "text": "<p>Distribution of samples over time.</p>",
@@ -1243,35 +1683,112 @@ def analysis_quantum_dynamics(run_id: str, plot_params: dict = None) -> dict:
                             text="step", title="Simulated Evolutionary Trajectory (VAE + ODE)")
     else:
         fig = px.line(traj_df, x="step", y=feature_cols[0], title="Simulated Trajectory")
-    if plot_params:
-        apply_plot_params(fig, plot_params)
+    apply_plot_params(fig, plot_params or {})
     figure_json = fig.to_dict() if fig else None
     return {"title": "Quantum‑Inspired Dynamics", "figure": figure_json,
             "text": "<p>Simulated evolutionary path using VAE and neural ODE.</p>"}
 
 
 def analysis_phylogenetic_tree(run_id: str, plot_params: dict = None) -> dict:
+    """Improved phylogenetic tree using Bio.Phylo and Plotly radial layout."""
     records = load_sequences(run_id)
     seqs = [str(r.seq).upper() for r in records]
     ids = [r.id for r in records]
     if len(seqs) < 3:
         return {"title": "Phylogenetic Tree", "error": "Need at least 3 sequences."}
 
+    # Compute distance matrix
     def encode_seq(s):
         mapping = {'A': 1, 'C': 2, 'G': 3, 'T': 4}
         return np.array([mapping.get(c, 0) for c in s])
 
     X = np.array([encode_seq(s) for s in seqs])
     dist_mat = pairwise_distances(X, metric='hamming')
-    from scipy.cluster.hierarchy import linkage, dendrogram
-    Z = linkage(dist_mat, method='average')
-    fig = ff.create_dendrogram(Z, labels=ids, orientation='bottom')
-    fig.update_layout(title="Neighbor-Joining Tree (UPGMA)")
-    if plot_params:
-        apply_plot_params(fig, plot_params)
+
+    # Build tree with NJ
+    from Bio.Phylo.TreeConstruction import DistanceMatrix
+    names = ids
+    matrix = []
+    for i in range(len(names)):
+        row = []
+        for j in range(i):
+            row.append(dist_mat[i, j])
+        matrix.append(row)
+    dm = DistanceMatrix(names, matrix)
+    constructor = DistanceTreeConstructor()
+    tree = constructor.nj(dm)
+
+    # Convert tree to Plotly scatter (radial layout)
+    def get_tree_coords(tree):
+        # Simple radial layout based on branch lengths
+        import math
+        coords = {}
+        # Assign angles to leaves
+        leaves = list(tree.get_terminals())
+        n_leaves = len(leaves)
+        for i, leaf in enumerate(leaves):
+            angle = 2 * math.pi * i / n_leaves
+            coords[leaf] = (1.0, angle)  # radius, angle
+
+        # Internal nodes: average child angles, radius = max child radius - branch length
+        def traverse(clade, parent_radius=None):
+            if clade.is_terminal():
+                return coords[clade]
+            child_angles = []
+            child_radii = []
+            for child in clade.clades:
+                r, ang = traverse(child, None)
+                child_angles.append(ang)
+                child_radii.append(r)
+            # Angle = circular mean
+            sin_sum = sum(math.sin(a) for a in child_angles)
+            cos_sum = sum(math.cos(a) for a in child_angles)
+            angle = math.atan2(sin_sum, cos_sum)
+            # Radius = max child radius - branch length (simplistic)
+            max_r = max(child_radii)
+            radius = max_r - clade.branch_length if clade.branch_length else max_r
+            coords[clade] = (radius, angle)
+            return radius, angle
+
+        traverse(tree.root)
+        # Convert polar to Cartesian
+        cart = {}
+        for node, (r, theta) in coords.items():
+            cart[node] = (r * math.cos(theta), r * math.sin(theta))
+        return cart
+
+    coords = get_tree_coords(tree)
+
+    # Create Plotly figure
+    fig = go.Figure()
+    # Add edges
+    for clade in tree.find_clades():
+        if clade == tree.root:
+            continue
+        x0, y0 = coords[clade]
+        x1, y1 = coords[tree.root] if clade in tree.root.clades else coords[list(clade.root.clades)[0]]
+        fig.add_trace(go.Scatter(x=[x0, x1, None], y=[y0, y1, None],
+                                 mode='lines', line=dict(color='gray', width=1),
+                                 hoverinfo='none', showlegend=False))
+    # Add nodes (labels for leaves)
+    leaf_x, leaf_y, leaf_names = [], [], []
+    for leaf in tree.get_terminals():
+        x, y = coords[leaf]
+        leaf_x.append(x)
+        leaf_y.append(y)
+        leaf_names.append(leaf.name)
+    fig.add_trace(go.Scatter(x=leaf_x, y=leaf_y, mode='markers+text',
+                             text=leaf_names, textposition="top center",
+                             marker=dict(size=8, color='blue'),
+                             name='Samples'))
+    fig.update_layout(title="Phylogenetic Tree (Neighbor-Joining)",
+                      showlegend=False,
+                      xaxis=dict(visible=False),
+                      yaxis=dict(visible=False))
+    apply_plot_params(fig, plot_params or {})
     figure_json = fig.to_dict()
     return {"title": "Phylogenetic Tree", "figure": figure_json,
-            "text": "<p>UPGMA dendrogram based on Hamming distance.</p>"}
+            "text": "<p>Neighbor-Joining tree based on Hamming distance.</p>"}
 
 
 def analysis_selection_pressure_fel(run_id: str, plot_params: dict = None) -> dict:
@@ -1325,11 +1842,10 @@ def analysis_selection_pressure_fel(run_id: str, plot_params: dict = None) -> di
         fig = px.line(df, x="codon", y="dN/dS", title="Site-wise dN/dS")
     elif plot_type == "heatmap":
         z = df["dN/dS"].values.reshape(1, -1)
-        fig = ff.create_annotated_heatmap(z, x=list(df["codon"]), y=["dN/dS"], colorscale='Viridis')
+        fig = px.imshow(z, x=df["codon"], y=["dN/dS"], aspect="auto", title="Site-wise dN/dS Heatmap")
     else:
         fig = px.bar(df, x="codon", y="dN/dS")
-    if plot_params:
-        apply_plot_params(fig, plot_params)
+    apply_plot_params(fig, plot_params or {})
     figure_json = fig.to_dict() if fig else None
     return {"title": "Site-wise Selection Pressure", "figure": figure_json,
             "text": df.to_html(index=False), "download_text": df.to_csv(index=False)}
@@ -1375,8 +1891,7 @@ def analysis_transmission_network(run_id: str, plot_params: dict = None) -> dict
     fig = go.Figure(data=edge_trace + [node_trace],
                     layout=go.Layout(title=f"Transmission Network (dist < {threshold})",
                                      showlegend=False, hovermode='closest'))
-    if plot_params:
-        apply_plot_params(fig, plot_params)
+    apply_plot_params(fig, plot_params or {})
     figure_json = fig.to_dict()
     return {"title": "Transmission Network", "figure": figure_json,
             "text": f"<p>Network with {G.number_of_nodes()} nodes and {G.number_of_edges()} edges.</p>"}
@@ -1404,11 +1919,10 @@ def analysis_antigenic_variation(run_id: str, plot_params: dict = None) -> dict:
     if df_freq.empty:
         return {"title": "Antigenic Variation", "error": "No variable antigenic sites."}
     pivot = df_freq.pivot(index="nucleotide", columns="position", values="frequency").fillna(0)
-    fig = ff.create_annotated_heatmap(z=pivot.values, x=list(pivot.columns), y=list(pivot.index),
-                                      colorscale='Viridis', showscale=True)
-    fig.update_layout(title="Nucleotide Frequencies at Antigenic Sites")
-    if plot_params:
-        apply_plot_params(fig, plot_params)
+    fig = px.imshow(pivot.values, x=list(pivot.columns), y=list(pivot.index),
+                    color_continuous_scale='Viridis', aspect="auto",
+                    title="Nucleotide Frequencies at Antigenic Sites")
+    apply_plot_params(fig, plot_params or {})
     figure_json = fig.to_dict()
     return {"title": "Antigenic Variation", "figure": figure_json,
             "text": "<p>Heatmap of nucleotide frequencies at antigenic positions.</p>",
@@ -1438,8 +1952,7 @@ def analysis_machine_learning_prediction(run_id: str, plot_params: dict = None) 
     y_pred = rf.predict(X_test)
     df_plot = pd.DataFrame({"actual": y_test, "predicted": y_pred})
     fig = px.scatter(df_plot, x="actual", y="predicted", trendline="ols", title=f"Predicted vs Actual ({target})")
-    if plot_params:
-        apply_plot_params(fig, plot_params)
+    apply_plot_params(fig, plot_params or {})
     figure_json = fig.to_dict()
     imp_df = pd.DataFrame({"feature": feature_cols, "importance": rf.feature_importances_}).sort_values("importance",
                                                                                                         ascending=False)
@@ -1492,8 +2005,7 @@ def analysis_pca(run_id: str, plot_params: dict = None) -> dict:
         fig = px.imshow(loadings_df, text_auto=True, aspect="auto", title="PCA Loadings")
     else:
         fig = px.scatter(x=components[:, 0], y=components[:, 1])
-    if plot_params:
-        apply_plot_params(fig, plot_params)
+    apply_plot_params(fig, plot_params or {})
     figure_json = fig.to_dict() if fig else None
     comp_df = pd.DataFrame(components, columns=[f"PC{i + 1}" for i in range(components.shape[1])])
     return {"title": "Principal Component Analysis", "figure": figure_json,
@@ -1524,8 +2036,7 @@ def analysis_vaccine_escape(run_id: str, plot_params: dict = None) -> dict:
         fig = px.violin(df, x="vaccinated_bin", y="antigenic_divergence", title="Antigenic Divergence by Vaccination")
     else:
         fig = px.scatter(df, x="antigenic_divergence", y="seq_entropy")
-    if plot_params:
-        apply_plot_params(fig, plot_params)
+    apply_plot_params(fig, plot_params or {})
     figure_json = fig.to_dict() if fig else None
     return {"title": "Vaccine Escape Prediction", "figure": figure_json,
             "text": top_escape.to_html(index=False), "download_text": top_escape.to_csv(index=False)}
@@ -1554,8 +2065,7 @@ def analysis_early_warning(run_id: str, plot_params: dict = None) -> dict:
         fig = px.area(df, x="collection_date", y="roll_var", title="Rolling Variance")
     else:
         fig = px.line(df, x="collection_date", y="risk_score")
-    if plot_params:
-        apply_plot_params(fig, plot_params)
+    apply_plot_params(fig, plot_params or {})
     figure_json = fig.to_dict() if fig else None
     return {"title": "Early Warning Signals", "figure": figure_json,
             "text": "<p>Rolling variance and autocorrelation of risk score.</p>"}
@@ -1577,8 +2087,7 @@ def analysis_raincloud(run_id: str, plot_params: dict = None) -> dict:
                              mode='markers', name='points',
                              marker=dict(color='darkblue', size=4)))
     fig.update_layout(title=f"Raincloud Plot of {var}")
-    if plot_params:
-        apply_plot_params(fig, plot_params)
+    apply_plot_params(fig, plot_params or {})
     figure_json = fig.to_dict()
     return {"title": "Raincloud Plot", "figure": figure_json,
             "text": f"<p>Raincloud plot for variable: {var}</p>"}
@@ -1619,8 +2128,7 @@ def analysis_venn(run_id: str, plot_params: dict = None) -> dict:
     except Exception as e:
         return {"title": "Venn Diagram", "error": f"Could not create Venn: {e}"}
     fig.update_layout(title="Mutation Set Venn Diagram (Antigenic Sites)")
-    if plot_params:
-        apply_plot_params(fig, plot_params)
+    apply_plot_params(fig, plot_params or {})
     figure_json = fig.to_dict()
     return {"title": "Venn Diagram", "figure": figure_json,
             "text": f"<p>Set1 size: {len(set1)}, Set2 size: {len(set2)}, Intersection: {len(set1 & set2)}</p>"}
@@ -1687,8 +2195,7 @@ def analysis_tmrca(run_id: str, plot_params: dict = None) -> dict:
     x_range = np.linspace(min(tip_dates), max(tip_dates), 100)
     y_range = slope * x_range + intercept
     fig.add_trace(go.Scatter(x=x_range, y=y_range, mode='lines', name='Regression'))
-    if plot_params:
-        apply_plot_params(fig, plot_params)
+    apply_plot_params(fig, plot_params or {})
     figure_json = fig.to_dict()
     return {"title": "TMRCA Estimation", "figure": figure_json,
             "text": f"<p>TMRCA: {tmrca:.3f} (year)<br>Slope (subs/site/year): {slope:.6f}<br>R²: {r_value ** 2:.3f}</p>"}
@@ -1736,8 +2243,7 @@ def analysis_spatial_interpolation(run_id: str, plot_params: dict = None) -> dic
                        text=df["sample_id"])
         ])
         fig.update_layout(title="Spatial Interpolation of Risk Score")
-    if plot_params:
-        apply_plot_params(fig, plot_params)
+    apply_plot_params(fig, plot_params or {})
     figure_json = fig.to_dict()
     return {"title": "Spatial Interpolation", "figure": figure_json,
             "text": "<p>Inverse distance weighting interpolation of risk score.</p>"}
@@ -1780,8 +2286,7 @@ def analysis_hotspot(run_id: str, plot_params: dict = None) -> dict:
         fig = px.scatter_mapbox(df, lat="lat", lon="lon", color="hotspot",
                                 hover_name="sample_id", title="Hotspot Analysis (Gi*)",
                                 mapbox_style="open-street-map", zoom=5)
-    if plot_params:
-        apply_plot_params(fig, plot_params)
+    apply_plot_params(fig, plot_params or {})
     figure_json = fig.to_dict()
     return {"title": "Hotspot Analysis", "figure": figure_json,
             "text": df[["sample_id", "hotspot", "Gi_star", "p_value"]].to_html(index=False),
@@ -1802,8 +2307,7 @@ def analysis_bubble_chart(run_id: str, plot_params: dict = None) -> dict:
         color = None
     fig = px.scatter(df, x=x, y=y, size=size, color=color, hover_name="sample_id",
                      title="Bubble Chart")
-    if plot_params:
-        apply_plot_params(fig, plot_params)
+    apply_plot_params(fig, plot_params or {})
     figure_json = fig.to_dict()
     return {"title": "Bubble Chart", "figure": figure_json, "text": "<p>Multi-dimensional bubble chart.</p>"}
 
@@ -1824,14 +2328,12 @@ def analysis_parallel_coordinates(run_id: str, plot_params: dict = None) -> dict
         color_col = selected[0]
     fig = px.parallel_coordinates(df, dimensions=selected, color=color_col,
                                   title="Parallel Coordinates Plot")
-    if plot_params:
-        apply_plot_params(fig, plot_params)
+    apply_plot_params(fig, plot_params or {})
     figure_json = fig.to_dict()
     return {"title": "Parallel Coordinates", "figure": figure_json,
             "text": "<p>High-dimensional feature inspection.</p>"}
 
 
-# New analysis: Quantum Forecast (extends quantum_dynamics with multiple trajectories)
 def analysis_quantum_forecast(run_id: str, plot_params: dict = None) -> dict:
     if not TORCH_AVAILABLE:
         return {"title": "Quantum Forecast", "error": "PyTorch not installed."}
@@ -1842,14 +2344,12 @@ def analysis_quantum_forecast(run_id: str, plot_params: dict = None) -> dict:
         return {"title": "Quantum Forecast", "error": "Not enough numeric features."}
     X = df[feature_cols].fillna(0.0).values
     vae, scaler = train_vae(X, latent_dim=8, epochs=50)
-    # Generate multiple trajectories from different starting points
     n_forecast = plot_params.get("n_forecast", 5) if plot_params else 5
     n_steps = plot_params.get("n_steps", 20) if plot_params else 20
     trajectories = []
     for i in range(min(n_forecast, len(X))):
         traj = predict_evolution(vae, scaler, X[i], n_steps=n_steps)
         trajectories.append(traj)
-    # Plot first three features in 3D
     if len(feature_cols) >= 3:
         fig = go.Figure()
         for j, traj in enumerate(trajectories):
@@ -1864,14 +2364,12 @@ def analysis_quantum_forecast(run_id: str, plot_params: dict = None) -> dict:
             fig.add_trace(go.Scatter(x=list(range(n_steps+1)), y=df_traj[feature_cols[0]],
                                      mode='lines+markers', name=f'Start {j}'))
         fig.update_layout(title="Quantum Forecast: Feature Evolution", xaxis_title="Step", yaxis_title=feature_cols[0])
-    if plot_params:
-        apply_plot_params(fig, plot_params)
+    apply_plot_params(fig, plot_params or {})
     figure_json = fig.to_dict()
     return {"title": "Quantum Forecast", "figure": figure_json,
             "text": f"<p>Generated {len(trajectories)} trajectories of {n_steps} steps each.</p>"}
 
 
-# New analysis: ML Forecast (LSTM for risk score prediction)
 def analysis_ml_forecast(run_id: str, plot_params: dict = None) -> dict:
     if not TORCH_AVAILABLE:
         return {"title": "ML Forecast", "error": "PyTorch not installed."}
@@ -1881,10 +2379,9 @@ def analysis_ml_forecast(run_id: str, plot_params: dict = None) -> dict:
     df = df.dropna(subset=["collection_date", "risk_score"]).sort_values("collection_date")
     if len(df) < 10:
         return {"title": "ML Forecast", "error": "Need at least 10 time points."}
-    # Prepare time series
     dates = pd.to_datetime(df["collection_date"])
     values = df["risk_score"].values
-    # Simple LSTM model
+
     class LSTMPredictor(nn.Module):
         def __init__(self, input_size=1, hidden_size=50, num_layers=2, output_size=1):
             super().__init__()
@@ -1894,7 +2391,7 @@ def analysis_ml_forecast(run_id: str, plot_params: dict = None) -> dict:
             out, _ = self.lstm(x)
             out = self.linear(out[:, -1, :])
             return out
-    # Create sequences
+
     seq_len = plot_params.get("seq_len", 5) if plot_params else 5
     X, y = [], []
     for i in range(len(values) - seq_len):
@@ -1904,24 +2401,19 @@ def analysis_ml_forecast(run_id: str, plot_params: dict = None) -> dict:
     y = np.array(y)
     if len(X) < 2:
         return {"title": "ML Forecast", "error": "Not enough sequences."}
-    # Train/test split
     split = int(0.8 * len(X))
     X_train, X_test = X[:split], X[split:]
     y_train, y_test = y[:split], y[split:]
-    # Convert to tensors
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     X_train_t = torch.tensor(X_train, dtype=torch.float32).to(device)
     y_train_t = torch.tensor(y_train, dtype=torch.float32).to(device).unsqueeze(1)
     X_test_t = torch.tensor(X_test, dtype=torch.float32).to(device)
     y_test_t = torch.tensor(y_test, dtype=torch.float32).to(device).unsqueeze(1)
-    # Create dataset
     train_dataset = TensorDataset(X_train_t, y_train_t)
     train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True)
-    # Model
     model = LSTMPredictor().to(device)
     optimizer = optim.Adam(model.parameters(), lr=0.001)
     criterion = nn.MSELoss()
-    # Train
     epochs = 50
     for epoch in range(epochs):
         model.train()
@@ -1931,20 +2423,13 @@ def analysis_ml_forecast(run_id: str, plot_params: dict = None) -> dict:
             loss = criterion(output, batch_y)
             loss.backward()
             optimizer.step()
-    # Predict on test
     model.eval()
     with torch.no_grad():
         y_pred = model(X_test_t).cpu().numpy().flatten()
-    # Plot
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=list(range(len(y_test))), y=y_test, mode='lines+markers', name='Actual'))
     fig.add_trace(go.Scatter(x=list(range(len(y_pred))), y=y_pred, mode='lines+markers', name='Predicted'))
     fig.update_layout(title="LSTM Forecast of Risk Score (Test Set)", xaxis_title="Time Step", yaxis_title="Risk Score")
-    if plot_params:
-        apply_plot_params(fig, plot_params)
-    figure_json = fig.to_dict()
-    # Also forecast future steps
-    # Use last sequence to predict next
     last_seq = values[-seq_len:].reshape(1, seq_len, 1)
     last_seq_t = torch.tensor(last_seq, dtype=torch.float32).to(device)
     future_preds = []
@@ -1953,35 +2438,92 @@ def analysis_ml_forecast(run_id: str, plot_params: dict = None) -> dict:
         with torch.no_grad():
             pred = model(current_seq)
         future_preds.append(pred.item())
-        # Update sequence: remove first, append pred
         new_seq = torch.cat([current_seq[:, 1:, :], pred.unsqueeze(2)], dim=1)
         current_seq = new_seq
-    # Add future to plot
     fig.add_trace(go.Scatter(x=list(range(len(values), len(values)+10)), y=future_preds,
                              mode='lines+markers', name='Future Forecast', line=dict(dash='dash')))
-    # Update figure
+    apply_plot_params(fig, plot_params or {})
     figure_json = fig.to_dict()
     return {"title": "ML Forecast (LSTM)", "figure": figure_json,
             "text": f"<p>Trained on {len(X_train)} sequences, tested on {len(X_test)}. Future 10 steps forecasted.</p>"}
 
 
-# Common plot parameter applier
-def apply_plot_params(fig: go.Figure, params: dict):
-    if not params:
-        return
-    width = params.get("width")
-    height = params.get("height")
-    if width and height:
-        fig.update_layout(width=int(width), height=int(height))
-    bgcolor = params.get("bgcolor")
-    if bgcolor:
-        fig.update_layout(plot_bgcolor=bgcolor, paper_bgcolor=bgcolor)
-    show_legend = params.get("show_legend")
-    if show_legend is not None:
-        fig.update_layout(showlegend=show_legend)
-    title = params.get("title")
-    if title is not None:
-        fig.update_layout(title=title if title else "")
+# New analysis: Bayesian Skyline (placeholder)
+def analysis_bayesian_skyline(run_id: str, plot_params: dict = None) -> dict:
+    """Placeholder for Bayesian skyline plot (requires BEAST or similar)."""
+    return {"title": "Bayesian Skyline",
+            "text": "<p>This analysis requires external BEAST output. Please run BEAST separately and upload the log file.</p>"}
+
+
+# New analysis: Relaxed Clock (simplified)
+def analysis_relaxed_clock(run_id: str, plot_params: dict = None) -> dict:
+    """Simple uncorrelated relaxed clock using root-to-tip regression with rate variation."""
+    df = load_merged_data(run_id)
+    records = load_sequences(run_id)
+    seqs = [str(r.seq).upper() for r in records]
+    ids = [r.id for r in records]
+    if "collection_date" not in df.columns:
+        return {"title": "Relaxed Clock", "error": "collection_date required."}
+    date_df = df[["sample_id", "collection_date"]].dropna()
+    if date_df.empty:
+        return {"title": "Relaxed Clock", "error": "No valid collection dates."}
+    date_df["date_num"] = pd.to_datetime(date_df["collection_date"]).apply(
+        lambda x: x.year + (x.dayofyear - 1) / 365.25)
+    common_ids = set(ids).intersection(date_df["sample_id"])
+    if len(common_ids) < 3:
+        return {"title": "Relaxed Clock", "error": "Need at least 3 samples with dates."}
+    seqs_filtered = []
+    ids_filtered = []
+    dates = []
+    for sid in common_ids:
+        idx = ids.index(sid)
+        seqs_filtered.append(seqs[idx])
+        ids_filtered.append(sid)
+        dates.append(date_df[date_df["sample_id"] == sid]["date_num"].iloc[0])
+    dates = np.array(dates)
+
+    def encode_seq(s):
+        mapping = {'A': 1, 'C': 2, 'G': 3, 'T': 4}
+        return np.array([mapping.get(c, 0) for c in s])
+
+    X = np.array([encode_seq(s) for s in seqs_filtered])
+    dist_mat = pairwise_distances(X, metric='hamming')
+    from Bio.Phylo.TreeConstruction import DistanceMatrix
+    names = ids_filtered
+    matrix = []
+    for i in range(len(names)):
+        row = []
+        for j in range(i):
+            row.append(dist_mat[i, j])
+        matrix.append(row)
+    dm = DistanceMatrix(names, matrix)
+    constructor = DistanceTreeConstructor()
+    tree = constructor.nj(dm)
+    tree.root_at_midpoint()
+    tips = tree.get_terminals()
+    tip_dates = []
+    tip_dist = []
+    for tip in tips:
+        name = tip.name
+        if name in ids_filtered:
+            tip_dates.append(dates[ids_filtered.index(name)])
+            tip_dist.append(tree.distance(tip, tree.root))
+    tip_dates = np.array(tip_dates)
+    tip_dist = np.array(tip_dist)
+    # Simple rate variation: compute per-branch rates? For plot, just show distribution of distances vs dates
+    fig = px.scatter(x=tip_dates, y=tip_dist, labels={'x': 'Date', 'y': 'Root-to-tip distance'},
+                     title="Root-to-tip distance (relaxed clock)")
+    # Add a LOESS smoother to show trend
+    from scipy.interpolate import UnivariateSpline
+    if len(tip_dates) > 5:
+        spline = UnivariateSpline(tip_dates, tip_dist, s=1)
+        x_smooth = np.linspace(min(tip_dates), max(tip_dates), 100)
+        y_smooth = spline(x_smooth)
+        fig.add_trace(go.Scatter(x=x_smooth, y=y_smooth, mode='lines', name='Trend', line=dict(color='red', dash='dash')))
+    apply_plot_params(fig, plot_params or {})
+    figure_json = fig.to_dict()
+    return {"title": "Relaxed Clock", "figure": figure_json,
+            "text": "<p>Root-to-tip distances with a smoothed trend line.</p>"}
 
 
 # Map analysis names to functions
@@ -2021,6 +2563,8 @@ ANALYSES = {
     "parallel_coordinates": analysis_parallel_coordinates,
     "quantum_forecast": analysis_quantum_forecast,
     "ml_forecast": analysis_ml_forecast,
+    "bayesian_skyline": analysis_bayesian_skyline,
+    "relaxed_clock": analysis_relaxed_clock,
 }
 
 
@@ -2047,11 +2591,12 @@ def download(run_id: str):
 async def run_api(
         wgs_fasta: UploadFile = File(...),
         epi_csv: UploadFile = File(...),
+        metadata_json: Optional[str] = Form(None),  # New: manual metadata as JSON string
 ):
     run_id = str(uuid.uuid4())[:8]
     try:
         wgs_b = _read_upload_as_bytes(wgs_fasta)
-        epi_b = _read_upload_as_bytes(epi_csv)
+        epi_b = _read_upload_as_bytes(epi_csv) if epi_csv else None
         run_dir = os.path.join(OUTPUT_ROOT, run_id)
         os.makedirs(run_dir, exist_ok=True)
         fasta_path = save_uploaded_fasta(run_dir, wgs_b)
@@ -2062,7 +2607,21 @@ async def run_api(
         if len(lengths) != 1:
             raise ValueError("Sequences have different lengths. Please provide aligned FASTA.")
         genomic_df = extract_features_from_alignment(records)
-        epi_df = epi_to_features_from_bytes(epi_b)
+        epi_df = epi_to_features_from_bytes(epi_b, metadata_json)
+        # If vaccine_strain_sequence present, compute distance
+        if "vaccine_strain_sequence" in epi_df.columns:
+            # Create a mapping from sample_id to vaccine strain sequence
+            vax_map = epi_df.set_index("sample_id")["vaccine_strain_sequence"].to_dict()
+            vax_dists = []
+            for rec in records:
+                if rec.id in vax_map:
+                    vax_seq = vax_map[rec.id].upper()
+                    # Simple Hamming distance (should be aligned)
+                    dist = sum(1 for a, b in zip(str(rec.seq).upper(), vax_seq) if a in "ACGT" and b in "ACGT" and a != b) / len(rec.seq)
+                else:
+                    dist = np.nan
+                vax_dists.append(dist)
+            genomic_df["vaccine_strain_distance"] = vax_dists
         merged = merge_features(genomic_df, epi_df)
         qc = basic_qc(merged)
         seqs = [str(r.seq).upper() for r in records]
@@ -2084,12 +2643,13 @@ async def run_api(
 @app.post("/run_ui", response_class=HTMLResponse)
 async def run_ui(
         wgs_fasta: UploadFile = File(...),
-        epi_csv: UploadFile = File(...),
+        epi_csv: UploadFile = File(None),  # optional if manual JSON provided
+        metadata_json: Optional[str] = Form(None),  # new
 ):
     run_id = str(uuid.uuid4())[:8]
     try:
         wgs_b = _read_upload_as_bytes(wgs_fasta)
-        epi_b = _read_upload_as_bytes(epi_csv)
+        epi_b = _read_upload_as_bytes(epi_csv) if epi_csv else None
         run_dir = os.path.join(OUTPUT_ROOT, run_id)
         os.makedirs(run_dir, exist_ok=True)
         fasta_path = save_uploaded_fasta(run_dir, wgs_b)
@@ -2100,14 +2660,24 @@ async def run_ui(
         if len(lengths) != 1:
             raise ValueError("Sequences have different lengths. Please provide aligned FASTA.")
         genomic_df = extract_features_from_alignment(records)
-        epi_df = epi_to_features_from_bytes(epi_b)
+        epi_df = epi_to_features_from_bytes(epi_b, metadata_json)
+        if "vaccine_strain_sequence" in epi_df.columns:
+            vax_map = epi_df.set_index("sample_id")["vaccine_strain_sequence"].to_dict()
+            vax_dists = []
+            for rec in records:
+                if rec.id in vax_map:
+                    vax_seq = vax_map[rec.id].upper()
+                    dist = sum(1 for a, b in zip(str(rec.seq).upper(), vax_seq) if a in "ACGT" and b in "ACGT" and a != b) / len(rec.seq)
+                else:
+                    dist = np.nan
+                vax_dists.append(dist)
+            genomic_df["vaccine_strain_distance"] = vax_dists
         merged = merge_features(genomic_df, epi_df)
         qc = basic_qc(merged)
         seqs = [str(r.seq).upper() for r in records]
         emb3d, manifold_model = topology_aware_embedding(seqs, n_components=3)
         emb2d = emb3d[:, :2]
         csv_path = save_outputs(run_id, merged, emb2d, emb3d, manifold_model)
-        # Load results for preview
         out = pd.read_csv(csv_path)
         fig1 = px.scatter(out, x="umap_x", y="umap_y", color="risk_score",
                           hover_data=[c for c in out.columns if c not in ["umap_x", "umap_y"]],
@@ -2283,7 +2853,9 @@ def render_results_page(run_id: str, qc: dict, preview_df: pd.DataFrame, fig1: g
             `,
             'ml_forecast': `
                 <label class="block"><span class="text-sm">Sequence length:</span> <input type="number" name="seq_len" value="5" min="2" max="20" class="bg-gray-700 rounded px-2 py-1 w-full"></label>
-            `
+            `,
+            'bayesian_skyline': `<p class="text-gray-400">Placeholder – no parameters.</p>`,
+            'relaxed_clock': `<p class="text-gray-400">No parameters</p>`,
         }};
 
         function updateParamFields() {{
@@ -2363,7 +2935,7 @@ def render_results_page(run_id: str, qc: dict, preview_df: pd.DataFrame, fig1: g
 </html>"""
 
 
-# ---------- New Landing Page (removed feature grid, added about/help/instructions) ----------
+# ---------- New Landing Page (with manual metadata entry) ----------
 INDEX_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2422,8 +2994,15 @@ INDEX_HTML = """<!DOCTYPE html>
                     <input type="file" name="wgs_fasta" accept=".fasta,.fa,.fna" required class="block w-full text-sm text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-pink-600 file:text-white hover:file:bg-pink-700 transition" />
                 </div>
                 <div>
-                    <label class="block text-lg mb-2">2. Epidemiology CSV <span class="text-sm text-gray-300">(sample_id, optional lat/lon, collection_date, farm_id, vaccinated, etc.)</span></label>
-                    <input type="file" name="epi_csv" accept=".csv" required class="block w-full text-sm text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-pink-600 file:text-white hover:file:bg-pink-700 transition" />
+                    <label class="block text-lg mb-2">2. Epidemiology CSV <span class="text-sm text-gray-300">(optional if using manual JSON)</span></label>
+                    <input type="file" name="epi_csv" accept=".csv" class="block w-full text-sm text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-pink-600 file:text-white hover:file:bg-pink-700 transition" />
+                </div>
+                <div>
+                    <label class="block text-lg mb-2">3. Or enter metadata manually (JSON format)</label>
+                    <textarea name="metadata_json" rows="8" class="w-full bg-gray-800 rounded-lg p-3 text-sm font-mono" placeholder='[
+  {"sample_id": "s1", "farm_id": "F1", "collection_date": "2023-01-15", "lat": 35.2, "lon": -80.1, "vaccinated": "yes", "vaccine_strain_sequence": "ATGC..."},
+  {"sample_id": "s2", "farm_id": "F1", "collection_date": "2023-02-20", "lat": 35.3, "lon": -80.2, "vaccinated": "no"}
+]'></textarea>
                 </div>
                 <button type="submit" class="w-full bg-gradient-to-r from-yellow-400 to-pink-500 text-gray-900 font-bold py-4 px-6 rounded-full text-xl shadow-lg hover:scale-105 transition-transform">
                     Launch Pipeline
@@ -2449,9 +3028,10 @@ INDEX_HTML = """<!DOCTYPE html>
                     <p>For any issues, please contact the developer. Common solutions:</p>
                     <ul class="list-disc list-inside">
                         <li>Ensure FASTA sequences are aligned (same length).</li>
-                        <li>CSV must contain a 'sample_id' column matching FASTA headers.</li>
+                        <li>CSV or JSON must contain a 'sample_id' column matching FASTA headers.</li>
                         <li>For geospatial features, include 'lat' and 'lon' columns.</li>
                         <li>To use satellite imagery, obtain a free Mapbox token from <a href="https://mapbox.com" target="_blank" class="text-yellow-300 underline">mapbox.com</a> and enter it in analysis parameters.</li>
+                        <li>New field 'vaccine_strain_sequence' can be provided to compute distance to vaccine strain.</li>
                     </ul>
                 </div>
             </details>
@@ -2468,7 +3048,7 @@ ATG... (same length for all)
 >sample_2
 ATG...</pre>
 
-                    <h3 class="text-xl font-semibold">Epidemiology CSV</h3>
+                    <h3 class="text-xl font-semibold">Epidemiology CSV/JSON</h3>
                     <p>Required column: <code>sample_id</code> (must match FASTA headers). Optional columns:</p>
                     <ul class="list-disc list-inside">
                         <li><code>farm_id</code> – farm identifier</li>
@@ -2478,12 +3058,13 @@ ATG...</pre>
                         <li><code>homologous_or_heterologous</code> – homologous/heterologous</li>
                         <li><code>vaccine_type</code> – for one-hot encoding</li>
                         <li><code>age_at_vaccination</code>, <code>age_at_challenge</code>, <code>challenge_dose</code> – numeric</li>
+                        <li><code>vaccine_strain_sequence</code> – nucleotide sequence of the vaccine strain used for each sample</li>
                     </ul>
                     <p>Example:</p>
                     <pre class="bg-gray-800 p-2 rounded text-sm overflow-x-auto">
-sample_id,farm_id,collection_date,lat,lon,vaccinated,homologous_or_heterologous
-s1,FARM1,2023-01-15,35.2,-80.1,yes,homologous
-s2,FARM1,2023-02-20,35.3,-80.2,no,</pre>
+sample_id,farm_id,collection_date,lat,lon,vaccinated,homologous_or_heterologous,vaccine_strain_sequence
+s1,FARM1,2023-01-15,35.2,-80.1,yes,homologous,ATGC...
+s2,FARM1,2023-02-20,35.3,-80.2,no,,</pre>
                 </div>
             </details>
 

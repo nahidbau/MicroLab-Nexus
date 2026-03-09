@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: genomeops-workbench
+    runtime: docker
+    plan: free
+    autoDeploy: true
+    healthCheckPath: /health
+    envVars:
+      - key: APP_PASSWORD
+        sync: false
