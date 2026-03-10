@@ -17,6 +17,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xz-utils \
     procps \
     build-essential \
+    git \
+    perl \
     default-jre \
     fastqc \
     fastp \

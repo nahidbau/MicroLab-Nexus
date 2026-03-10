@@ -1,0 +1,13 @@
+services:
+  genomeapp:
+    build: .
+    container_name: genomeapp
+    ports:
+      - "10000:10000"
+    environment:
+      APP_PASSWORD: "change_this_password"
+      HOST: "0.0.0.0"
+      PORT: "10000"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
