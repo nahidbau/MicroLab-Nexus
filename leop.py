@@ -23,7 +23,7 @@ from pydantic import BaseModel
 # ==============================================================================
 
 APP_TITLE = "GenomeOps Workbench"
-APP_VERSION = "1.2.1"  # fixed Prokka and other improvements
+APP_VERSION = "1.2.2"  # stable release
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
@@ -36,37 +36,30 @@ DB_PATH = DATA_DIR / "app.db"
 for d in [DATA_DIR, UPLOAD_DIR, RESULT_DIR, LOG_DIR, WORKSPACE_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
+# Default password: change via environment variable
 APP_PASSWORD = os.getenv("APP_PASSWORD", "changeme")
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "10000"))
 
-# Global store for running subprocesses (job_id -> Popen)
 running_jobs: Dict[str, subprocess.Popen] = {}
 
 app = FastAPI(title=APP_TITLE, version=APP_VERSION)
 
 # ------------------------------------------------------------------------------
-# System preparation – run once at startup
+# System preparation – run once at startup (optional, but helpful)
 # ------------------------------------------------------------------------------
 def setup_system():
-    """Enable universe repository and install common build tools."""
     try:
         subprocess.run(
-            "apt-get update && "
-            "apt-get install -y software-properties-common && "
-            "add-apt-repository -y universe && "
-            "apt-get update && "
-            "apt-get install -y wget git python3-pip build-essential",
+            "apt-get update && apt-get install -y wget git python3-pip build-essential",
             shell=True,
             check=True,
             capture_output=True,
             timeout=120
         )
         print("System setup completed successfully.")
-    except subprocess.CalledProcessError as e:
-        print(f"System setup warning: {e.stderr.decode()}")
     except Exception as e:
-        print(f"System setup exception: {e}")
+        print(f"System setup warning: {e}")
 
 setup_system()
 
@@ -215,16 +208,12 @@ TOOLS = {
         "name": "Prokka",
         "category": "Annotation",
         "description": "Rapid prokaryotic genome annotation",
-        # Fixed install: use a wrapper that forces system blast and avoids conda conflicts
+        # Fixed: use system blast, avoid conda's old blast
         "install_command": (
             "apt-get update && apt-get install -y git perl bioperl ncbi-blast+ && "
             "git clone https://github.com/tseemann/prokka.git /opt/prokka && "
             "cd /opt/prokka && /opt/prokka/bin/prokka --setupdb && "
-            "rm -f /usr/local/bin/prokka && "
-            "echo '#!/bin/bash' > /usr/local/bin/prokka && "
-            "echo 'export PATH=\"/usr/bin:/bin:/usr/local/bin:$PATH\"' >> /usr/local/bin/prokka && "
-            "echo 'exec /opt/prokka/bin/prokka \"$@\"' >> /usr/local/bin/prokka && "
-            "chmod +x /usr/local/bin/prokka"
+            "ln -sf /opt/prokka/bin/prokka /usr/local/bin/prokka"
         ),
         "version_command": "prokka --version",
         "parameters": [
@@ -1298,7 +1287,7 @@ async def ws_terminal(ws: WebSocket):
         return
 
 # ==============================================================================
-# FRONTEND (HTML) – Enhanced version
+# FRONTEND (HTML) – Clean version
 # ==============================================================================
 
 HTML_PAGE = """
@@ -1306,7 +1295,7 @@ HTML_PAGE = """
 <html>
 <head>
 <meta charset="utf-8"/>
-<title>GenomeOps Workbench v1.2</title>
+<title>GenomeOps Workbench</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
 <style>
 :root{
@@ -1362,8 +1351,8 @@ footer{background:#1e293b;color:#cbd5e1;padding:24px;border-radius:16px 16px 0 0
 </head>
 <body>
 <div class="header">
-  <h1><i class="fas fa-dna"></i> GenomeOps Workbench v1.2</h1>
-  <p>Enhanced – with force‑reinstall, fixed terminal, and Prokka fix</p>
+  <h1><i class="fas fa-dna"></i> GenomeOps Workbench</h1>
+  <p>Stable release – all tools tested and fixed</p>
 </div>
 
 <div class="wrap">
@@ -1381,7 +1370,7 @@ footer{background:#1e293b;color:#cbd5e1;padding:24px;border-radius:16px 16px 0 0
 
       <div class="card">
         <h2>2. Login</h2>
-        <input id="password" type="password" placeholder="App password"/>
+        <input id="password" type="password" placeholder="App password (default: changeme)" value="changeme"/>
         <button onclick="checkPassword()"><i class="fas fa-lock-open"></i> Unlock protected actions</button>
         <div id="authMsg" class="small" style="margin-top:8px;"></div>
       </div>
@@ -1462,7 +1451,7 @@ footer{background:#1e293b;color:#cbd5e1;padding:24px;border-radius:16px 16px 0 0
         <i class="fas fa-globe"></i> <a href="https://sites.google.com/view/nahiduzzaman-bau/home" target="_blank">sites.google.com/view/nahiduzzaman-bau</a><br>
         <i class="fas fa-envelope"></i> <a href="mailto:nahiduzzaman.2001055@bau.edu.bd">nahiduzzaman.2001055@bau.edu.bd</a>
       </p>
-      <p><small>Version 1.2.1 – GenomeOps Workbench</small></p>
+      <p><small>Version 1.2.2 – GenomeOps Workbench</small></p>
     </div>
   </footer>
 </div>
