@@ -23,7 +23,7 @@ from pydantic import BaseModel
 # ==============================================================================
 
 APP_TITLE = "GenomeOps Workbench"
-APP_VERSION = "1.2.1"  # fixed Prokka and tool installations
+APP_VERSION = "1.2.2"  # fixed Prokka PATH issue
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
@@ -46,17 +46,13 @@ running_jobs: Dict[str, subprocess.Popen] = {}
 app = FastAPI(title=APP_TITLE, version=APP_VERSION)
 
 # ------------------------------------------------------------------------------
-# System preparation – run once at startup
+# System preparation – run once at startup (ignore warnings)
 # ------------------------------------------------------------------------------
 def setup_system():
-    """Enable universe repository and install common build tools."""
+    """Install basic build tools (skip universe if not available)."""
     try:
         subprocess.run(
-            "apt-get update && "
-            "apt-get install -y software-properties-common && "
-            "add-apt-repository -y universe && "
-            "apt-get update && "
-            "apt-get install -y wget git python3-pip build-essential ncbi-blast+",
+            "apt-get update && apt-get install -y wget git python3-pip build-essential ncbi-blast+",
             shell=True,
             check=True,
             capture_output=True,
@@ -215,17 +211,13 @@ TOOLS = {
         "name": "Prokka",
         "category": "Annotation",
         "description": "Rapid prokaryotic genome annotation",
-        # Fixed install: remove conda version, use GitHub master, ensure correct PATH
+        # Install: remove conda version, use GitHub master, ensure correct PATH
         "install_command": (
             "apt-get update && apt-get install -y git perl bioperl ncbi-blast+ && "
-            # Remove any existing conda prokka
             "rm -f /opt/conda/bin/prokka || true && "
-            # Clone fresh from GitHub
             "git clone https://github.com/tseemann/prokka.git /opt/prokka && "
             "cd /opt/prokka && /opt/prokka/bin/prokka --setupdb && "
-            # Create symlink in /usr/local/bin (should be before conda in PATH)
             "ln -sf /opt/prokka/bin/prokka /usr/local/bin/prokka && "
-            # Also ensure blastp from apt is used (blastp may be in /usr/bin)
             "ln -sf /usr/bin/blastp /usr/local/bin/blastp || true"
         ),
         "version_command": "prokka --version",
@@ -855,9 +847,12 @@ class CancelJobRequest(BaseModel):
 # ASYNC JOB RUNNERS
 # ==============================================================================
 
-async def run_job_command(job_id: str, command: str, work_dir: Path):
+async def run_job_command(job_id: str, command: str, work_dir: Path, env: Optional[Dict] = None):
     update_job(job_id, status="running", started_at=now_str(), result_dir=str(work_dir))
     append_log(job_id, f"[{now_str()}] Running in {work_dir}\n")
+
+    if env is None:
+        env = os.environ.copy()
 
     loop = asyncio.get_event_loop()
     proc = await loop.run_in_executor(None, lambda: subprocess.Popen(
@@ -866,7 +861,8 @@ async def run_job_command(job_id: str, command: str, work_dir: Path):
         cwd=str(work_dir),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True
+        text=True,
+        env=env
     ))
     running_jobs[job_id] = proc
 
@@ -1140,11 +1136,15 @@ async def api_run_tool_dynamic(req: ToolRunDynamicRequest):
     work_dir = RESULT_DIR / f"{req.tool_key}_{uuid.uuid4().hex[:8]}"
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    # For Prokka, use full path to avoid conda version
+    # For Prokka, use full path to avoid conda version and set PATH to prioritize system blastp
     if req.tool_key == "prokka":
         cmd_parts = ["/usr/local/bin/prokka"]
+        # Override PATH to ensure system blastp is found first
+        env = os.environ.copy()
+        env["PATH"] = "/usr/local/bin:/usr/bin:" + env.get("PATH", "")
     else:
         cmd_parts = [req.tool_key]
+        env = None
 
     for param in parameters:
         pname = param["name"]
@@ -1174,7 +1174,7 @@ async def api_run_tool_dynamic(req: ToolRunDynamicRequest):
 
     job_id = create_job("tool", f"Run {tool['name']}", command)
     update_job(job_id, result_dir=str(work_dir))
-    asyncio.create_task(run_job_command(job_id, command, work_dir))
+    asyncio.create_task(run_job_command(job_id, command, work_dir, env=env))
     return {"job_id": job_id, "command": command}
 
 @app.get("/api/jobs")
@@ -1309,7 +1309,7 @@ async def ws_terminal(ws: WebSocket):
         return
 
 # ==============================================================================
-# FRONTEND (HTML) – Enhanced version (unchanged)
+# FRONTEND (HTML) – Enhanced version (unchanged except version)
 # ==============================================================================
 
 HTML_PAGE = """
@@ -1317,7 +1317,7 @@ HTML_PAGE = """
 <html>
 <head>
 <meta charset="utf-8"/>
-<title>GenomeOps Workbench v1.2.1</title>
+<title>GenomeOps Workbench v1.2.2</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
 <style>
 :root{
@@ -1373,8 +1373,8 @@ footer{background:#1e293b;color:#cbd5e1;padding:24px;border-radius:16px 16px 0 0
 </head>
 <body>
 <div class="header">
-  <h1><i class="fas fa-dna"></i> GenomeOps Workbench v1.2.1</h1>
-  <p>Fixed Prokka – now uses latest GitHub version with correct blastp</p>
+  <h1><i class="fas fa-dna"></i> GenomeOps Workbench v1.2.2</h1>
+  <p>Fixed Prokka – now forces system blastp via PATH override</p>
 </div>
 
 <div class="wrap">
@@ -1473,7 +1473,7 @@ footer{background:#1e293b;color:#cbd5e1;padding:24px;border-radius:16px 16px 0 0
         <i class="fas fa-globe"></i> <a href="https://sites.google.com/view/nahiduzzaman-bau/home" target="_blank">sites.google.com/view/nahiduzzaman-bau</a><br>
         <i class="fas fa-envelope"></i> <a href="mailto:nahiduzzaman.2001055@bau.edu.bd">nahiduzzaman.2001055@bau.edu.bd</a>
       </p>
-      <p><small>Version 1.2.1 – GenomeOps Workbench</small></p>
+      <p><small>Version 1.2.2 – GenomeOps Workbench</small></p>
     </div>
   </footer>
 </div>
