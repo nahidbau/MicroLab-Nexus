@@ -1,4 +1,13 @@
 fastapi
 uvicorn[standard]
+pandas
+numpy
+geopandas
+matplotlib
+shapely
+requests
+openpyxl
 python-multipart
-pydantic
+fiona
+pyproj
+pyogrio
