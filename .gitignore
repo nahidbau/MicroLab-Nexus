@@ -4,6 +4,10 @@ runs/
 uploads/
 runtime_data/
 viral_evolution_output/
+data/
+hyphy/
+jobs/
+outputs/
 *.db
 *.sqlite3
 *.pyc
