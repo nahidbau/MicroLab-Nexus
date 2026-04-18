@@ -1,0 +1,118 @@
+{
+  "job_id": "c1a49939-d2fe-4678-a45c-c44b23008b24",
+  "job_name": "Time-calibrated PRRSV BEAST run",
+  "status": "preparing",
+  "progress": 8.0,
+  "message": "Running MUSCLE alignment...",
+  "error": null,
+  "created_at": 1774560860.2709963,
+  "updated_at": 1774560860.3424392,
+  "events": [
+    {
+      "time": "2026-03-27 03:34:20",
+      "message": "Job created."
+    },
+    {
+      "time": "2026-03-27 03:34:20",
+      "message": "Resolved BEAST binary: C:\\Users\\nahid_vv0xche\\Downloads\\New folder\\BEAST X v10.5.0\\BEAST v10.5.0.exe"
+    },
+    {
+      "time": "2026-03-27 03:34:20",
+      "message": "Resolved TreeAnnotator binary: C:\\Users\\nahid_vv0xche\\Downloads\\New folder\\BEAST X v10.5.0\\TreeAnnotator v10.5.0.exe"
+    },
+    {
+      "time": "2026-03-27 03:34:20",
+      "message": "Resolved MUSCLE binary: C:\\Users\\nahid_vv0xche\\Downloads\\muscle-win64.v5.3.exe"
+    },
+    {
+      "time": "2026-03-27 03:34:20",
+      "message": "Runs root: C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs"
+    },
+    {
+      "time": "2026-03-27 03:34:20",
+      "message": "Job started."
+    },
+    {
+      "time": "2026-03-27 03:34:20",
+      "message": "MUSCLE alignment requested."
+    }
+  ],
+  "summary": {},
+  "manifest": [
+    {
+      "key": "raw_input",
+      "label": "Raw input",
+      "filename": "raw_input.fasta",
+      "size_bytes": 512362,
+      "size_human": "500.4 KB"
+    },
+    {
+      "key": "metadata_csv",
+      "label": "Metadata CSV",
+      "filename": "metadata.csv",
+      "size_bytes": 0,
+      "size_human": "0.0 B"
+    },
+    {
+      "key": "event_log",
+      "label": "Event log",
+      "filename": "events.log",
+      "size_bytes": 519,
+      "size_human": "519.0 B"
+    }
+  ],
+  "config": {
+    "job_name": "Time-calibrated PRRSV BEAST run",
+    "chain_length": 1000000,
+    "log_every": 1000,
+    "screen_every": 1000,
+    "threads": 2,
+    "substitution_model": "HKY",
+    "clock_model": "strict",
+    "tree_prior": "coalescent_constant",
+    "gamma_categories": 4,
+    "use_tip_dates": false,
+    "estimate_base_freqs": false,
+    "sample_prior_only": false,
+    "treeannotator_burnin_percent": 10,
+    "run_alignment": true,
+    "assume_already_aligned": false
+  },
+  "capabilities": {
+    "beast_bin": "C:\\Users\\nahid_vv0xche\\Downloads\\New folder\\BEAST X v10.5.0\\BEAST v10.5.0.exe",
+    "treeannotator_bin": "C:\\Users\\nahid_vv0xche\\Downloads\\New folder\\BEAST X v10.5.0\\TreeAnnotator v10.5.0.exe",
+    "muscle_bin": "C:\\Users\\nahid_vv0xche\\Downloads\\muscle-win64.v5.3.exe",
+    "runs_root": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs"
+  },
+  "pairwise_taxa": [],
+  "pairwise_matrix": [],
+  "tree_newick": "",
+  "paths": {
+    "run_dir": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\c1a49939-d2fe-4678-a45c-c44b23008b24",
+    "input_dir": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\c1a49939-d2fe-4678-a45c-c44b23008b24\\input",
+    "config_dir": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\c1a49939-d2fe-4678-a45c-c44b23008b24\\config",
+    "output_dir": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\c1a49939-d2fe-4678-a45c-c44b23008b24\\output",
+    "logs_dir": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\c1a49939-d2fe-4678-a45c-c44b23008b24\\logs",
+    "tree_dir": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\c1a49939-d2fe-4678-a45c-c44b23008b24\\trees",
+    "raw_input": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\c1a49939-d2fe-4678-a45c-c44b23008b24\\input\\raw_input.fasta",
+    "aligned_input": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\c1a49939-d2fe-4678-a45c-c44b23008b24\\input\\aligned_input.fasta",
+    "metadata_csv": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\c1a49939-d2fe-4678-a45c-c44b23008b24\\input\\metadata.csv",
+    "xml": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\c1a49939-d2fe-4678-a45c-c44b23008b24\\config\\analysis.xml",
+    "event_log": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\c1a49939-d2fe-4678-a45c-c44b23008b24\\logs\\events.log",
+    "runner_stdout": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\c1a49939-d2fe-4678-a45c-c44b23008b24\\logs\\runner_stdout.log",
+    "runner_stderr": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\c1a49939-d2fe-4678-a45c-c44b23008b24\\logs\\runner_stderr.log",
+    "alignment_stdout": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\c1a49939-d2fe-4678-a45c-c44b23008b24\\logs\\alignment_stdout.log",
+    "alignment_stderr": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\c1a49939-d2fe-4678-a45c-c44b23008b24\\logs\\alignment_stderr.log",
+    "trace_log": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\c1a49939-d2fe-4678-a45c-c44b23008b24\\output\\analysis.log",
+    "trees": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\c1a49939-d2fe-4678-a45c-c44b23008b24\\output\\analysis.trees",
+    "mcc_tree": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\c1a49939-d2fe-4678-a45c-c44b23008b24\\output\\analysis_mcc.tree",
+    "summary_json": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\c1a49939-d2fe-4678-a45c-c44b23008b24\\output\\summary.json",
+    "summary_txt": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\c1a49939-d2fe-4678-a45c-c44b23008b24\\output\\summary.txt",
+    "pairwise_csv": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\c1a49939-d2fe-4678-a45c-c44b23008b24\\output\\pairwise_distance_matrix.csv",
+    "pairwise_json": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\c1a49939-d2fe-4678-a45c-c44b23008b24\\output\\pairwise_distance_matrix.json",
+    "upgma_nwk": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\c1a49939-d2fe-4678-a45c-c44b23008b24\\trees\\upgma_tree.nwk",
+    "upgma_nexus": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\c1a49939-d2fe-4678-a45c-c44b23008b24\\trees\\upgma_tree.nex",
+    "edited_tree_nwk": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\c1a49939-d2fe-4678-a45c-c44b23008b24\\trees\\edited_tree.nwk",
+    "edited_tree_nexus": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\c1a49939-d2fe-4678-a45c-c44b23008b24\\trees\\edited_tree.nex"
+  }
+}

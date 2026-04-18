@@ -1,0 +1,212 @@
+{
+  "job_id": "920ac069-aa10-4362-86e6-0602ace36197",
+  "job_name": "Time-calibrated BEAST run",
+  "status": "finished",
+  "progress": 100.0,
+  "message": "Analysis complete.",
+  "error": null,
+  "created_at": 1774541920.4586008,
+  "updated_at": 1774541923.7777581,
+  "events": [
+    {
+      "time": "2026-03-26 22:18:40",
+      "message": "Job created."
+    },
+    {
+      "time": "2026-03-26 22:18:40",
+      "message": "Resolved BEAST binary: C:\\Users\\nahid_vv0xche\\Downloads\\New folder\\BEAST X v10.5.0\\BEAST v10.5.0.exe"
+    },
+    {
+      "time": "2026-03-26 22:18:40",
+      "message": "Resolved TreeAnnotator binary: C:\\Users\\nahid_vv0xche\\Downloads\\New folder\\BEAST X v10.5.0\\TreeAnnotator v10.5.0.exe"
+    },
+    {
+      "time": "2026-03-26 22:18:40",
+      "message": "Resolved MUSCLE binary: None"
+    },
+    {
+      "time": "2026-03-26 22:18:40",
+      "message": "Runs root: C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs"
+    },
+    {
+      "time": "2026-03-26 22:18:40",
+      "message": "Job started."
+    },
+    {
+      "time": "2026-03-26 22:18:40",
+      "message": "Alignment QC and detailed summary generated."
+    },
+    {
+      "time": "2026-03-26 22:18:40",
+      "message": "BEAST XML created successfully."
+    },
+    {
+      "time": "2026-03-26 22:18:40",
+      "message": "Launching BEAST with 2 thread(s)."
+    },
+    {
+      "time": "2026-03-26 22:18:42",
+      "message": "BEAST completed successfully."
+    },
+    {
+      "time": "2026-03-26 22:18:43",
+      "message": "Posterior trees file not found; MCC tree skipped."
+    },
+    {
+      "time": "2026-03-26 22:18:43",
+      "message": "Job completed."
+    }
+  ],
+  "summary": {
+    "taxa_count": 8,
+    "alignment_length": 900,
+    "gc_mean": 48.8611,
+    "gc_min": 48.5556,
+    "gc_max": 49.1111,
+    "ambiguity_characters": 0,
+    "ambiguity_fraction": 0.0,
+    "base_counts": {
+      "A": 1733,
+      "C": 1766,
+      "G": 1752,
+      "T": 1949,
+      "N": 0,
+      "-": 0,
+      "?": 0
+    },
+    "base_freqs": {
+      "A": 0.240694,
+      "C": 0.245278,
+      "G": 0.243333,
+      "T": 0.270694,
+      "N": 0.0,
+      "-": 0.0,
+      "?": 0.0
+    },
+    "constant_sites": 792,
+    "variable_sites": 108,
+    "singleton_sites": 29,
+    "parsimony_informative_sites": 79,
+    "sites_with_ambiguity_or_gap": 0,
+    "pairwise_distance_min": 0.011111,
+    "pairwise_distance_mean": 0.052302,
+    "pairwise_distance_max": 0.118889,
+    "pairwise_distance_stdev": 0.031303,
+    "pairwise_distance_n_pairs": 28,
+    "metadata_rows_matched": 8,
+    "metadata_coverage_fraction": 1.0,
+    "metadata_date_min": "2018.25",
+    "metadata_date_max": "2025.05",
+    "taxa_preview": [
+      "PRRSV_USA_2018_A",
+      "PRRSV_USA_2019_B",
+      "PRRSV_USA_2020_C",
+      "PRRSV_USA_2021_D",
+      "PRRSV_USA_2022_E",
+      "PRRSV_USA_2023_F",
+      "PRRSV_USA_2024_G",
+      "PRRSV_USA_2025_H"
+    ],
+    "nucleotide_diversity": 0.052302,
+    "tajima_d": 0.0
+  },
+  "manifest": [
+    {
+      "key": "alignment",
+      "label": "Alignment input",
+      "filename": "alignment.fasta",
+      "size_bytes": 7448,
+      "size_human": "7.3 KB"
+    },
+    {
+      "key": "metadata_csv",
+      "label": "Metadata CSV",
+      "filename": "metadata.csv",
+      "size_bytes": 534,
+      "size_human": "534.0 B"
+    },
+    {
+      "key": "xml",
+      "label": "Generated XML",
+      "filename": "analysis.xml",
+      "size_bytes": 14279,
+      "size_human": "13.9 KB"
+    },
+    {
+      "key": "event_log",
+      "label": "Event log",
+      "filename": "events.log",
+      "size_bytes": 775,
+      "size_human": "775.0 B"
+    },
+    {
+      "key": "runner_stdout",
+      "label": "Runner stdout",
+      "filename": "runner_stdout.log",
+      "size_bytes": 227,
+      "size_human": "227.0 B"
+    },
+    {
+      "key": "runner_stderr",
+      "label": "Runner stderr",
+      "filename": "runner_stderr.log",
+      "size_bytes": 0,
+      "size_human": "0.0 B"
+    },
+    {
+      "key": "summary_json",
+      "label": "Summary JSON",
+      "filename": "summary.json",
+      "size_bytes": 1221,
+      "size_human": "1.2 KB"
+    },
+    {
+      "key": "summary_txt",
+      "label": "Summary text",
+      "filename": "summary.txt",
+      "size_bytes": 1221,
+      "size_human": "1.2 KB"
+    }
+  ],
+  "config": {
+    "job_name": "Time-calibrated BEAST run",
+    "chain_length": 1000000,
+    "log_every": 1000,
+    "screen_every": 1000,
+    "threads": 2,
+    "substitution_model": "HKY",
+    "clock_model": "strict",
+    "tree_prior": "coalescent_constant",
+    "gamma_categories": 4,
+    "use_tip_dates": true,
+    "estimate_base_freqs": true,
+    "sample_prior_only": false,
+    "treeannotator_burnin_percent": 10
+  },
+  "capabilities": {
+    "beast_bin": "C:\\Users\\nahid_vv0xche\\Downloads\\New folder\\BEAST X v10.5.0\\BEAST v10.5.0.exe",
+    "treeannotator_bin": "C:\\Users\\nahid_vv0xche\\Downloads\\New folder\\BEAST X v10.5.0\\TreeAnnotator v10.5.0.exe",
+    "muscle_bin": null,
+    "runs_root": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs"
+  },
+  "paths": {
+    "run_dir": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\920ac069-aa10-4362-86e6-0602ace36197",
+    "input_dir": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\920ac069-aa10-4362-86e6-0602ace36197\\input",
+    "config_dir": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\920ac069-aa10-4362-86e6-0602ace36197\\config",
+    "output_dir": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\920ac069-aa10-4362-86e6-0602ace36197\\output",
+    "logs_dir": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\920ac069-aa10-4362-86e6-0602ace36197\\logs",
+    "alignment": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\920ac069-aa10-4362-86e6-0602ace36197\\input\\alignment.fasta",
+    "metadata_csv": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\920ac069-aa10-4362-86e6-0602ace36197\\input\\metadata.csv",
+    "xml": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\920ac069-aa10-4362-86e6-0602ace36197\\config\\analysis.xml",
+    "event_log": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\920ac069-aa10-4362-86e6-0602ace36197\\logs\\events.log",
+    "runner_stdout": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\920ac069-aa10-4362-86e6-0602ace36197\\logs\\runner_stdout.log",
+    "runner_stderr": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\920ac069-aa10-4362-86e6-0602ace36197\\logs\\runner_stderr.log",
+    "trace_log": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\920ac069-aa10-4362-86e6-0602ace36197\\output\\analysis.log",
+    "trees": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\920ac069-aa10-4362-86e6-0602ace36197\\output\\analysis.trees",
+    "mcc_tree": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\920ac069-aa10-4362-86e6-0602ace36197\\output\\analysis_mcc.tree",
+    "summary_json": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\920ac069-aa10-4362-86e6-0602ace36197\\output\\summary.json",
+    "summary_txt": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\920ac069-aa10-4362-86e6-0602ace36197\\output\\summary.txt",
+    "aligned_fasta": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\920ac069-aa10-4362-86e6-0602ace36197\\output\\aligned.fasta",
+    "newick_tree": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\920ac069-aa10-4362-86e6-0602ace36197\\output\\analysis.nwk"
+  }
+}

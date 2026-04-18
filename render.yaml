@@ -1,10 +1,16 @@
 services:
   - type: web
-    name: genomeops-workbench
-    runtime: docker
+    name: microlab-nexus
+    runtime: python
     plan: free
-    autoDeploy: true
-    healthCheckPath: /health
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn microlab_nexus:app --host 0.0.0.0 --port $PORT
     envVars:
-      - key: APP_PASSWORD
-        sync: false
+      - key: MICROLAB_SECRET
+        generateValue: true
+      - key: MICROLAB_DB
+        value: /var/data/microlab_nexus.db
+    disk:
+      name: microlab-data
+      mountPath: /var/data
+      sizeGB: 1

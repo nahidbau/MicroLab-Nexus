@@ -1,0 +1,151 @@
+{
+  "job_id": "e93bf60f-5509-41e6-bc29-fdef0fbeb011",
+  "job_name": "Time-calibrated PRRSV BEAST run",
+  "status": "failed",
+  "progress": 100.0,
+  "message": "Job failed.",
+  "error": "BEAST executable not found on PATH.",
+  "created_at": 1774536916.8459399,
+  "updated_at": 1774536916.9122229,
+  "events": [
+    {
+      "time": "2026-03-26 20:55:16",
+      "message": "Job created."
+    },
+    {
+      "time": "2026-03-26 20:55:16",
+      "message": "BEAST available: False"
+    },
+    {
+      "time": "2026-03-26 20:55:16",
+      "message": "TreeAnnotator available: False"
+    },
+    {
+      "time": "2026-03-26 20:55:16",
+      "message": "Job started."
+    },
+    {
+      "time": "2026-03-26 20:55:16",
+      "message": "Input files parsed successfully."
+    },
+    {
+      "time": "2026-03-26 20:55:16",
+      "message": "Alignment summary generated."
+    },
+    {
+      "time": "2026-03-26 20:55:16",
+      "message": "BEAST XML generated successfully."
+    },
+    {
+      "time": "2026-03-26 20:55:16",
+      "message": "ERROR: BEAST executable not found on PATH."
+    }
+  ],
+  "summary": {
+    "taxa_count": 8,
+    "alignment_length": 900,
+    "gc_mean": 48.861,
+    "gc_min": 48.556,
+    "gc_max": 49.111,
+    "variable_sites": 108,
+    "pairwise_distance_min": 0.011111,
+    "pairwise_distance_mean": 0.052302,
+    "pairwise_distance_max": 0.118889,
+    "pairwise_distance_n_pairs": 28,
+    "metadata_rows_matched": 8,
+    "metadata_date_min": "2018.25",
+    "metadata_date_max": "2025.05",
+    "taxa_preview": [
+      "PRRSV_USA_2018_A",
+      "PRRSV_USA_2019_B",
+      "PRRSV_USA_2020_C",
+      "PRRSV_USA_2021_D",
+      "PRRSV_USA_2022_E",
+      "PRRSV_USA_2023_F",
+      "PRRSV_USA_2024_G",
+      "PRRSV_USA_2025_H"
+    ]
+  },
+  "manifest": [
+    {
+      "key": "alignment",
+      "label": "Alignment input",
+      "filename": "alignment.fasta",
+      "size_bytes": 7448,
+      "size_human": "7.3 KB"
+    },
+    {
+      "key": "metadata_csv",
+      "label": "Metadata / tip-dates CSV",
+      "filename": "metadata.csv",
+      "size_bytes": 534,
+      "size_human": "534.0 B"
+    },
+    {
+      "key": "xml",
+      "label": "Generated BEAST XML",
+      "filename": "analysis.xml",
+      "size_bytes": 14279,
+      "size_human": "13.9 KB"
+    },
+    {
+      "key": "event_log",
+      "label": "Event log",
+      "filename": "events.log",
+      "size_bytes": 403,
+      "size_human": "403.0 B"
+    },
+    {
+      "key": "summary_json",
+      "label": "Alignment summary JSON",
+      "filename": "summary.json",
+      "size_bytes": 619,
+      "size_human": "619.0 B"
+    },
+    {
+      "key": "summary_txt",
+      "label": "Alignment summary text",
+      "filename": "summary.txt",
+      "size_bytes": 275,
+      "size_human": "275.0 B"
+    }
+  ],
+  "capabilities": {
+    "beast_available": false,
+    "treeannotator_available": false,
+    "metadata_uploaded": true
+  },
+  "config": {
+    "job_name": "Time-calibrated PRRSV BEAST run",
+    "chain_length": 1000000,
+    "log_every": 1000,
+    "screen_every": 1000,
+    "threads": 2,
+    "substitution_model": "HKY",
+    "clock_model": "strict",
+    "tree_prior": "coalescent_constant",
+    "gamma_categories": 4,
+    "use_tip_dates": true,
+    "estimate_base_freqs": true,
+    "sample_prior_only": false,
+    "treeannotator_burnin_percent": 10
+  },
+  "paths": {
+    "run_dir": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\e93bf60f-5509-41e6-bc29-fdef0fbeb011",
+    "input_dir": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\e93bf60f-5509-41e6-bc29-fdef0fbeb011\\input",
+    "config_dir": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\e93bf60f-5509-41e6-bc29-fdef0fbeb011\\config",
+    "output_dir": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\e93bf60f-5509-41e6-bc29-fdef0fbeb011\\output",
+    "logs_dir": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\e93bf60f-5509-41e6-bc29-fdef0fbeb011\\logs",
+    "alignment": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\e93bf60f-5509-41e6-bc29-fdef0fbeb011\\input\\alignment.fasta",
+    "metadata_csv": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\e93bf60f-5509-41e6-bc29-fdef0fbeb011\\input\\metadata.csv",
+    "xml": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\e93bf60f-5509-41e6-bc29-fdef0fbeb011\\config\\analysis.xml",
+    "event_log": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\e93bf60f-5509-41e6-bc29-fdef0fbeb011\\logs\\events.log",
+    "runner_stdout": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\e93bf60f-5509-41e6-bc29-fdef0fbeb011\\logs\\runner_stdout.log",
+    "runner_stderr": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\e93bf60f-5509-41e6-bc29-fdef0fbeb011\\logs\\runner_stderr.log",
+    "trace_log": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\e93bf60f-5509-41e6-bc29-fdef0fbeb011\\output\\analysis.log",
+    "trees": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\e93bf60f-5509-41e6-bc29-fdef0fbeb011\\output\\analysis.trees",
+    "mcc_tree": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\e93bf60f-5509-41e6-bc29-fdef0fbeb011\\output\\analysis_mcc.tree",
+    "summary_json": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\e93bf60f-5509-41e6-bc29-fdef0fbeb011\\output\\summary.json",
+    "summary_txt": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\e93bf60f-5509-41e6-bc29-fdef0fbeb011\\output\\summary.txt"
+  }
+}

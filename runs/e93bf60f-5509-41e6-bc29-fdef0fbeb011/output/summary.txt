@@ -1,0 +1,10 @@
+Taxa count: 8
+Alignment length: 900
+Mean GC%: 48.861
+GC range: 48.556 - 49.111
+Variable sites: 108
+Pairwise p-distance mean: 0.052302
+Pairwise p-distance min: 0.011111
+Pairwise p-distance max: 0.118889
+Matched metadata rows: 8
+Metadata date range: 2018.25 to 2025.05

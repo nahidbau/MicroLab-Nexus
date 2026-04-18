@@ -1,0 +1,21 @@
+{
+  "job_id": "455d347e-ebf5-4cda-9a71-5b5d7284ec84",
+  "job_name": "Time-calibrated PRRSV BEAST run",
+  "status": "failed",
+  "created_at": 1774535727.8036811,
+  "updated_at": 1774535727.8442268,
+  "progress": 100.0,
+  "message": "Job failed.",
+  "beast_available": false,
+  "treeannotator_available": false,
+  "run_dir": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\455d347e-ebf5-4cda-9a71-5b5d7284ec84",
+  "input_alignment": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\455d347e-ebf5-4cda-9a71-5b5d7284ec84\\demo_alignment.fasta",
+  "input_dates": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\455d347e-ebf5-4cda-9a71-5b5d7284ec84\\demo_tip_dates_metadata.csv",
+  "xml_path": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\455d347e-ebf5-4cda-9a71-5b5d7284ec84\\analysis.xml",
+  "stdout_path": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\455d347e-ebf5-4cda-9a71-5b5d7284ec84\\runner_stdout.log",
+  "stderr_path": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\455d347e-ebf5-4cda-9a71-5b5d7284ec84\\runner_stderr.log",
+  "log_path": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\455d347e-ebf5-4cda-9a71-5b5d7284ec84\\analysis.log",
+  "trees_path": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\455d347e-ebf5-4cda-9a71-5b5d7284ec84\\analysis.trees",
+  "mcc_tree_path": "C:\\Users\\nahid_vv0xche\\PyCharmMiscProject\\runs\\455d347e-ebf5-4cda-9a71-5b5d7284ec84\\analysis_mcc.tree",
+  "error": "BEAST executable not found on PATH. Install BEAST 2 and ensure `beast` is available."
+}

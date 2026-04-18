@@ -1,0 +1,9 @@
+taxon,date,country,host,collection_year,note
+PRRSV_USA_2018_A,2018.25,USA,Pig,2018,Synthetic demo record
+PRRSV_USA_2019_B,2019.10,USA,Pig,2019,Synthetic demo record
+PRRSV_USA_2020_C,2020.35,USA,Pig,2020,Synthetic demo record
+PRRSV_USA_2021_D,2021.55,USA,Pig,2021,Synthetic demo record
+PRRSV_USA_2022_E,2022.15,USA,Pig,2022,Synthetic demo record
+PRRSV_USA_2023_F,2023.40,USA,Pig,2023,Synthetic demo record
+PRRSV_USA_2024_G,2024.20,USA,Pig,2024,Synthetic demo record
+PRRSV_USA_2025_H,2025.05,USA,Pig,2025,Synthetic demo record

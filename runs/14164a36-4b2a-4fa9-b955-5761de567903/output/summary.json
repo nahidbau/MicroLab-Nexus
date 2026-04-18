@@ -1,0 +1,25 @@
+{
+  "taxa_count": 8,
+  "alignment_length": 900,
+  "gc_mean": 48.861,
+  "gc_min": 48.556,
+  "gc_max": 49.111,
+  "variable_sites": 108,
+  "pairwise_distance_min": 0.011111,
+  "pairwise_distance_mean": 0.052302,
+  "pairwise_distance_max": 0.118889,
+  "pairwise_distance_n_pairs": 28,
+  "metadata_rows_matched": 8,
+  "metadata_date_min": "2018.25",
+  "metadata_date_max": "2025.05",
+  "taxa_preview": [
+    "PRRSV_USA_2018_A",
+    "PRRSV_USA_2019_B",
+    "PRRSV_USA_2020_C",
+    "PRRSV_USA_2021_D",
+    "PRRSV_USA_2022_E",
+    "PRRSV_USA_2023_F",
+    "PRRSV_USA_2024_G",
+    "PRRSV_USA_2025_H"
+  ]
+}

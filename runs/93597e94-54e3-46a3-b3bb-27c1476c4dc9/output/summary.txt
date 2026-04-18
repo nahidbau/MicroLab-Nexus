@@ -1,0 +1,51 @@
+{
+  "taxa_count": 8,
+  "alignment_length": 900,
+  "gc_mean": 48.8611,
+  "gc_min": 48.5556,
+  "gc_max": 49.1111,
+  "ambiguity_characters": 0,
+  "ambiguity_fraction": 0.0,
+  "base_counts": {
+    "A": 1733,
+    "C": 1766,
+    "G": 1752,
+    "T": 1949,
+    "N": 0,
+    "-": 0,
+    "?": 0
+  },
+  "base_freqs": {
+    "A": 0.240694,
+    "C": 0.245278,
+    "G": 0.243333,
+    "T": 0.270694,
+    "N": 0.0,
+    "-": 0.0,
+    "?": 0.0
+  },
+  "constant_sites": 792,
+  "variable_sites": 108,
+  "singleton_sites": 29,
+  "parsimony_informative_sites": 79,
+  "sites_with_ambiguity_or_gap": 0,
+  "pairwise_distance_min": 0.011111,
+  "pairwise_distance_mean": 0.052302,
+  "pairwise_distance_max": 0.118889,
+  "pairwise_distance_stdev": 0.031303,
+  "pairwise_distance_n_pairs": 28,
+  "metadata_rows_matched": 8,
+  "metadata_coverage_fraction": 1.0,
+  "metadata_date_min": "2018.25",
+  "metadata_date_max": "2025.05",
+  "taxa_preview": [
+    "PRRSV_USA_2018_A",
+    "PRRSV_USA_2019_B",
+    "PRRSV_USA_2020_C",
+    "PRRSV_USA_2021_D",
+    "PRRSV_USA_2022_E",
+    "PRRSV_USA_2023_F",
+    "PRRSV_USA_2024_G",
+    "PRRSV_USA_2025_H"
+  ]
+}
