@@ -8,7 +8,7 @@ import random
 import sqlite3
 from contextlib import closing
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Form, UploadFile, File, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -52,7 +52,11 @@ BADGES = {
     "poll_creator": "📊 Poll Master",
     "shake_master": "🧪 Flask Shaker",
     "inoculator": "🦠 Streaker",
+    "game_master": "🎮 Game Master",
 }
+
+# ---------- Game state (in‑memory) ----------
+active_games: Dict[str, dict] = {}   # game_id -> {type, players, state, ...}
 
 app = FastAPI(title=APP_TITLE)
 app.add_middleware(
@@ -72,10 +76,8 @@ lab_activities: List[dict] = []
 # Database helpers (thread-safe with WAL mode)
 # ------------------------------------------------------------------
 def get_db() -> sqlite3.Connection:
-    """Return a new database connection with WAL mode enabled."""
     conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=10.0)
     conn.row_factory = sqlite3.Row
-    # Enable WAL mode for better concurrency
     conn.execute("PRAGMA journal_mode=WAL;")
     return conn
 
@@ -100,8 +102,7 @@ def init_db() -> None:
                 message TEXT NOT NULL,
                 channel TEXT NOT NULL,
                 created_at TEXT NOT NULL,
-                edited INTEGER DEFAULT 0,
-                reactions_json TEXT DEFAULT '{}'
+                edited INTEGER DEFAULT 0
             )
         """)
         cur.execute("""
@@ -240,16 +241,15 @@ def save_public_message(username: str, message: str, channel: str) -> dict:
         "channel": channel,
         "timestamp": now_iso(),
         "edited": False,
-        "reactions": {},
     }
     with closing(get_db()) as conn:
         cur = conn.cursor()
         cur.execute(
             """
-            INSERT INTO messages (id, username, message, channel, created_at, edited, reactions_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO messages (id, username, message, channel, created_at, edited)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (msg["id"], username, message, channel, msg["timestamp"], 0, "{}"),
+            (msg["id"], username, message, channel, msg["timestamp"], 0),
         )
         conn.commit()
     return msg
@@ -264,24 +264,6 @@ def delete_message(message_id: str, requester: str) -> bool:
         cur.execute("DELETE FROM messages WHERE id = ?", (message_id,))
         conn.commit()
         return True
-
-def edit_message(message_id: str, requester: str, new_text: str) -> Optional[dict]:
-    with closing(get_db()) as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT username, channel, created_at FROM messages WHERE id = ?", (message_id,))
-        row = cur.fetchone()
-        if not row or row["username"] != requester:
-            return None
-        cur.execute("UPDATE messages SET message = ?, edited = 1 WHERE id = ?", (new_text, message_id))
-        conn.commit()
-        return {
-            "id": message_id,
-            "username": requester,
-            "message": new_text,
-            "channel": row["channel"],
-            "timestamp": row["created_at"],
-            "edited": True,
-        }
 
 def list_users_online() -> List[dict]:
     users = []
@@ -350,7 +332,6 @@ def list_unread_private_messages(username: str) -> List[dict]:
             (username,),
         )
         rows = cur.fetchall()
-        # Mark as read
         cur.execute("UPDATE private_messages SET is_read = 1 WHERE recipient = ?", (username,))
         conn.commit()
         return [{
@@ -380,27 +361,6 @@ def save_private_message(sender: str, recipient: str, message: str) -> dict:
         )
         conn.commit()
     return item
-
-def set_message_reaction(message_id: str, username: str, emoji: str) -> Optional[dict]:
-    with closing(get_db()) as conn:
-        cur = conn.cursor()
-        cur.execute("SELECT reactions_json FROM messages WHERE id = ?", (message_id,))
-        row = cur.fetchone()
-        if not row:
-            return None
-        reactions = json.loads(row["reactions_json"] or "{}")
-        users = reactions.get(emoji, [])
-        if username in users:
-            users.remove(username)
-        else:
-            users.append(username)
-        if users:
-            reactions[emoji] = users
-        else:
-            reactions.pop(emoji, None)
-        cur.execute("UPDATE messages SET reactions_json = ? WHERE id = ?", (json.dumps(reactions), message_id))
-        conn.commit()
-        return reactions
 
 def get_unread_private_count(username: str) -> int:
     with closing(get_db()) as conn:
@@ -482,6 +442,40 @@ def get_request_user(request: Request) -> Optional[str]:
     if token_user and get_user(token_user):
         return token_user
     return None
+
+# ------------------------------------------------------------------
+# Game helpers
+# ------------------------------------------------------------------
+def create_game(game_type: str, players: List[str]) -> str:
+    game_id = str(uuid.uuid4())
+    if game_type == "tictactoe":
+        state = {
+            "board": [""] * 9,
+            "turn": players[0],
+            "winner": None,
+        }
+    elif game_type == "rps":
+        state = {
+            "moves": {},
+            "winner": None,
+        }
+    elif game_type == "truthdare":
+        state = {"last": None}
+    elif game_type == "numberguess":
+        state = {
+            "secret": random.randint(1, 100),
+            "guesses": {},
+            "winner": None,
+        }
+    else:
+        raise ValueError("Unknown game type")
+    active_games[game_id] = {
+        "type": game_type,
+        "players": players,
+        "state": state,
+        "created_at": now_iso(),
+    }
+    return game_id
 
 # ------------------------------------------------------------------
 # Startup & Routes
@@ -629,17 +623,6 @@ async def delete_message_endpoint(message_id: str, request: Request):
         return JSONResponse({"success": True})
     raise HTTPException(status_code=403, detail="Not allowed to delete this message")
 
-@app.post("/message/{message_id}")
-async def edit_message_endpoint(message_id: str, request: Request, new_text: str = Form(...)):
-    username = get_request_user(request)
-    if not username:
-        raise HTTPException(status_code=401)
-    updated = edit_message(message_id, username, new_text.strip())
-    if updated:
-        await manager.broadcast_all({"type": "message_edited", **updated})
-        return JSONResponse({"success": True})
-    raise HTTPException(status_code=403, detail="Not allowed to edit this message")
-
 @app.post("/update_bio")
 async def update_bio(request: Request, bio: str = Form(...)):
     username = get_request_user(request)
@@ -663,7 +646,6 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket, username)
     row = get_user(username)
 
-    # Initial data – no public message history
     try:
         await manager.safe_send(websocket, {
             "type": "init",
@@ -679,6 +661,7 @@ async def websocket_endpoint(websocket: WebSocket):
             "unread_private_count": get_unread_private_count(username),
             "leaderboard": list_leaderboard(),
             "server_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "games": list(active_games.keys()),  # optional, can be used for game list
         })
     except Exception as e:
         print(f"Init error: {e}")
@@ -705,11 +688,13 @@ async def websocket_endpoint(websocket: WebSocket):
             except:
                 continue
 
+            # Typing indicator
             if "typing" in payload:
                 channel = payload.get("channel", "public")
                 await manager.set_typing(username, channel, bool(payload["typing"]))
                 continue
 
+            # Switch channel
             if payload.get("switch_channel"):
                 new_channel = payload.get("channel", "public")
                 if new_channel not in ALLOWED_CHANNELS:
@@ -718,6 +703,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 await manager.broadcast_user_list()
                 continue
 
+            # Commands
             if "command" in payload:
                 cmd = str(payload["command"]).strip().lower()
                 if cmd == "random_fact":
@@ -757,12 +743,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     await manager.safe_send(websocket, {"type": "system", "username": "ℹ️ Help", "message": help_text})
                 continue
 
-            if payload.get("reaction"):
-                updated = set_message_reaction(payload["msg_id"], username, payload["emoji"])
-                if updated is not None:
-                    await manager.broadcast_all({"type": "reaction_update", "msg_id": payload["msg_id"], "reactions": updated})
-                continue
-
+            # Private message
             if payload.get("private_message"):
                 target = str(payload.get("target", "")).strip()
                 message = str(payload.get("message", "")).strip()
@@ -792,6 +773,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 await manager.broadcast_leaderboard()
                 continue
 
+            # Poll vote
             if payload.get("poll_vote"):
                 poll_id = payload.get("poll_id")
                 option = payload.get("option")
@@ -816,6 +798,137 @@ async def websocket_endpoint(websocket: WebSocket):
                             await manager.broadcast_leaderboard()
                 continue
 
+            # Game actions
+            if "game" in payload:
+                action = payload["game"]
+                if action == "challenge":
+                    game_type = payload.get("game_type")
+                    opponent = payload.get("opponent")
+                    if opponent not in active_ws:
+                        await manager.safe_send(websocket, {"type": "error", "message": "User not online."})
+                        continue
+                    game_id = create_game(game_type, [username, opponent])
+                    # Notify opponent
+                    await manager.safe_send(active_ws[opponent], {
+                        "type": "game_challenge",
+                        "from": username,
+                        "game_type": game_type,
+                        "game_id": game_id,
+                    })
+                    await manager.safe_send(websocket, {"type": "game_challenge_sent", "game_id": game_id, "opponent": opponent})
+                elif action == "accept":
+                    game_id = payload["game_id"]
+                    game = active_games.get(game_id)
+                    if not game or username not in game["players"]:
+                        continue
+                    # Both players get game start
+                    for player in game["players"]:
+                        if player in active_ws:
+                            await manager.safe_send(active_ws[player], {
+                                "type": "game_start",
+                                "game_id": game_id,
+                                "game_type": game["type"],
+                                "state": game["state"],
+                                "players": game["players"],
+                            })
+                elif action == "move":
+                    game_id = payload["game_id"]
+                    game = active_games.get(game_id)
+                    if not game or username not in game["players"]:
+                        continue
+                    gtype = game["type"]
+                    state = game["state"]
+                    if gtype == "tictactoe":
+                        if state["turn"] != username or state["winner"]:
+                            continue
+                        idx = payload.get("index")
+                        if idx is None or idx < 0 or idx > 8 or state["board"][idx]:
+                            continue
+                        state["board"][idx] = "X" if username == game["players"][0] else "O"
+                        # Check win
+                        win_patterns = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]]
+                        for p in win_patterns:
+                            if state["board"][p[0]] and state["board"][p[0]] == state["board"][p[1]] == state["board"][p[2]]:
+                                state["winner"] = username
+                                update_points(username, 20, f"won Tic-Tac-Toe")
+                                award_badge(username, "game_master")
+                                break
+                        if not state["winner"] and "" not in state["board"]:
+                            state["winner"] = "draw"
+                        state["turn"] = game["players"][1] if state["turn"] == game["players"][0] else game["players"][0]
+                        # Broadcast state
+                        for player in game["players"]:
+                            if player in active_ws:
+                                await manager.safe_send(active_ws[player], {
+                                    "type": "game_update",
+                                    "game_id": game_id,
+                                    "state": state,
+                                })
+                        if state["winner"]:
+                            # Clean up game after a while
+                            pass
+                    elif gtype == "rps":
+                        move = payload.get("move")  # rock, paper, scissors
+                        if move not in ["rock", "paper", "scissors"]:
+                            continue
+                        state["moves"][username] = move
+                        if len(state["moves"]) == 2:
+                            p1, p2 = game["players"]
+                            m1, m2 = state["moves"][p1], state["moves"][p2]
+                            if m1 == m2:
+                                winner = "draw"
+                            elif (m1 == "rock" and m2 == "scissors") or (m1 == "paper" and m2 == "rock") or (m1 == "scissors" and m2 == "paper"):
+                                winner = p1
+                            else:
+                                winner = p2
+                            state["winner"] = winner
+                            if winner != "draw":
+                                update_points(winner, 15, "won Rock-Paper-Scissors")
+                                award_badge(winner, "game_master")
+                            for player in game["players"]:
+                                if player in active_ws:
+                                    await manager.safe_send(active_ws[player], {
+                                        "type": "game_update",
+                                        "game_id": game_id,
+                                        "state": state,
+                                    })
+                    elif gtype == "truthdare":
+                        choice = payload.get("choice")  # truth or dare
+                        prompts = {
+                            "truth": ["What is your biggest fear?", "Have you ever lied to a friend?", "What is your most embarrassing moment?"],
+                            "dare": ["Do 5 push-ups now!", "Sing a song loudly!", "Send a funny message to the group."],
+                        }
+                        prompt = random.choice(prompts.get(choice, ["Think of something!"]))
+                        for player in game["players"]:
+                            if player in active_ws:
+                                await manager.safe_send(active_ws[player], {
+                                    "type": "game_prompt",
+                                    "game_id": game_id,
+                                    "prompt": prompt,
+                                    "from": username,
+                                })
+                    elif gtype == "numberguess":
+                        guess = payload.get("guess")
+                        if guess is None:
+                            continue
+                        secret = state["secret"]
+                        if guess == secret:
+                            state["winner"] = username
+                            update_points(username, 25, "guessed the number")
+                            award_badge(username, "game_master")
+                        else:
+                            hint = "higher" if guess < secret else "lower"
+                            state["guesses"][username] = {"guess": guess, "hint": hint}
+                        for player in game["players"]:
+                            if player in active_ws:
+                                await manager.safe_send(active_ws[player], {
+                                    "type": "game_update",
+                                    "game_id": game_id,
+                                    "state": state,
+                                })
+                continue
+
+            # Chat message
             if "text" in payload:
                 message = str(payload["text"]).strip()
                 channel = payload.get("channel", "public")
@@ -845,7 +958,7 @@ async def websocket_endpoint(websocket: WebSocket):
         })
 
 # ------------------------------------------------------------------
-# HTML Templates (improved UI, includes /help)
+# HTML Templates (optimized for Android, games added)
 # ------------------------------------------------------------------
 LOGIN_HTML = """
 <!DOCTYPE html>
@@ -1241,17 +1354,17 @@ CHAT_HTML = """
         }
         .messages{
             flex:1;
-            overflow:auto;
+            overflow-y:auto;
             display:flex;
             flex-direction:column;
-            gap:14px;
+            gap:6px;  /* reduced distance between messages */
             padding-right:4px;
         }
         .message{
             max-width:min(74%, 780px);
             display:flex;
             flex-direction:column;
-            gap:6px;
+            gap:4px;
             position:relative;
             animation:fadeIn 0.2s ease;
         }
@@ -1289,34 +1402,16 @@ CHAT_HTML = """
             color:var(--muted);
             font-size:12px;
         }
-        .delete-btn, .edit-btn{
+        .delete-btn{
             background:transparent;
             border:none;
-            color:var(--muted);
+            color:var(--danger);
             cursor:pointer;
             font-size:14px;
             opacity:0.7;
             transition:opacity 0.2s;
         }
-        .delete-btn{color:var(--danger);}
-        .delete-btn:hover, .edit-btn:hover{opacity:1}
-        .reactions{
-            display:flex;
-            gap:8px;
-            flex-wrap:wrap;
-        }
-        .reaction{
-            padding:4px 10px;
-            border-radius:999px;
-            background:rgba(255,255,255,0.03);
-            border:1px solid var(--line);
-            font-size:13px;
-            cursor:pointer;
-            transition:var(--transition);
-        }
-        .reaction:hover{
-            background:rgba(110,231,199,0.1);
-        }
+        .delete-btn:hover{opacity:1}
         .typing{
             min-height:24px;
             color:var(--warning);
@@ -1326,12 +1421,13 @@ CHAT_HTML = """
         .composer{
             display:grid;
             grid-template-columns:1fr auto auto;
-            gap:10px;
+            gap:8px;
             align-items:center;
+            padding:8px 0;
         }
         .composer input{
             width:100%;
-            padding:16px 18px;
+            padding:14px 16px;
             border-radius:22px;
             border:1px solid rgba(255,255,255,0.06);
             background:rgba(0,0,0,0.25);
@@ -1346,12 +1442,12 @@ CHAT_HTML = """
             box-shadow:0 0 0 3px rgba(110,231,199,0.15);
         }
         .icon-btn, .send-btn{
-            min-width:54px;
-            height:54px;
-            border-radius:22px;
+            min-width:48px;
+            height:48px;
+            border-radius:20px;
             display:grid;
             place-items:center;
-            font-size:22px;
+            font-size:20px;
         }
         .send-btn{
             background:linear-gradient(135deg, var(--brand), #a4ffe5);
@@ -1360,7 +1456,7 @@ CHAT_HTML = """
         }
         .view{display:none; min-height:0; overflow:auto}
         .view.active{display:block}
-        .poll-card, .file-card{
+        .poll-card, .file-card, .game-card{
             padding:18px;
             border-radius:22px;
             border:1px solid var(--line);
@@ -1369,10 +1465,10 @@ CHAT_HTML = """
             backdrop-filter:blur(5px);
             transition:var(--transition);
         }
-        .poll-card:hover, .file-card:hover{
+        .poll-card:hover, .file-card:hover, .game-card:hover{
             border-color:rgba(110,231,199,0.2);
         }
-        .poll-option{
+        .poll-option, .game-option{
             margin-top:10px;
             width:100%;
             text-align:left;
@@ -1384,7 +1480,7 @@ CHAT_HTML = """
             cursor:pointer;
             transition:var(--transition);
         }
-        .poll-option:hover{
+        .poll-option:hover, .game-option:hover{
             background:rgba(110,231,199,0.1);
         }
         .file-link{
@@ -1454,6 +1550,25 @@ CHAT_HTML = """
             font-size:12px;
             margin-left:8px;
         }
+        /* Game board styles */
+        .board{
+            display:grid;
+            grid-template-columns:repeat(3,1fr);
+            gap:8px;
+            margin:16px 0;
+        }
+        .cell{
+            aspect-ratio:1/1;
+            background:rgba(255,255,255,0.05);
+            border:1px solid var(--line);
+            border-radius:16px;
+            display:grid;
+            place-items:center;
+            font-size:32px;
+            font-weight:bold;
+            cursor:pointer;
+        }
+        .cell:hover{background:rgba(110,231,199,0.1);}
         @media (max-width: 1240px){
             .shell{grid-template-columns:280px 1fr}
             .right{display:none}
@@ -1463,6 +1578,7 @@ CHAT_HTML = """
             .left{display:none}
             .main{padding:10px}
             .hero h1{font-size:28px;}
+            .composer{gap:6px;}
         }
     </style>
 </head>
@@ -1497,7 +1613,7 @@ CHAT_HTML = """
             <div class="hero">
                 <div>
                     <h1>MicroLab Nexus</h1>
-                    <div class="muted">Persistent • Real‑time • No history • Type /help</div>
+                    <div class="muted">Persistent • Real‑time • Games • /help</div>
                 </div>
                 <div class="pill">🔔 <span id="unreadCounter">0</span> • Server: <span id="serverTime">--</span></div>
             </div>
@@ -1506,6 +1622,7 @@ CHAT_HTML = """
                 <button class="tab active" data-view="chatView">💬 Chat</button>
                 <button class="tab" data-view="pollsView">📊 Polls</button>
                 <button class="tab" data-view="filesView">📁 Files</button>
+                <button class="tab" data-view="gamesView">🎮 Games</button>
             </div>
 
             <section class="workspace">
@@ -1541,6 +1658,14 @@ CHAT_HTML = """
 
                 <div id="filesView" class="view">
                     <div id="allFilesList"></div>
+                </div>
+
+                <div id="gamesView" class="view">
+                    <div class="card">
+                        <div class="section-label">Available Games</div>
+                        <div id="gamesList"></div>
+                    </div>
+                    <div id="activeGamePanel" class="card" style="display:none;"></div>
                 </div>
             </section>
             <div class="dev-credit">Developed by Nahiduzzman</div>
@@ -1589,6 +1714,8 @@ let privateMsgs = [];
 let polls = [];
 let soundEnabled = true;
 let unreadPrivateCount = 0;
+let activeGameId = null;
+let gameState = null;
 
 function escapeHtml(s){
     return String(s).replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
@@ -1635,6 +1762,7 @@ function handleMessage(data){
             renderFiles(data.files || []);
             renderActivities(data.activities || []);
             renderLeaderboard(data.leaderboard || []);
+            renderGamesList();
             break;
         case "chat":
             publicMessages.push(data);
@@ -1671,18 +1799,31 @@ function handleMessage(data){
             break;
         case "file_upload": appendSingleFile({ id: data.file_id, filename: data.filename, uploader: data.uploader, time: data.time }); break;
         case "file_deleted": document.querySelector(`[data-file-id="${data.file_id}"]`)?.remove(); break;
-        case "reaction_update":
-            updateReactionUI(data.msg_id, data.reactions || {});
-            publicMessages = publicMessages.map(m => m.id === data.msg_id ? {...m, reactions:data.reactions || {}} : m);
-            break;
         case "message_deleted":
             const el = document.querySelector(`[data-message-id="${data.message_id}"]`);
             if(el) el.remove();
             publicMessages = publicMessages.filter(m => m.id !== data.message_id);
             break;
-        case "message_edited":
-            publicMessages = publicMessages.map(m => m.id === data.id ? {...m, message: data.message, edited: true} : m);
-            updateMessageInUI(data);
+        // Game events
+        case "game_challenge":
+            if(confirm(`${data.from} challenges you to ${data.game_type}. Accept?`)){
+                ws.send(JSON.stringify({game:"accept", game_id:data.game_id}));
+            }
+            break;
+        case "game_challenge_sent":
+            showSystem("🎮", `Challenge sent to ${data.opponent}`);
+            break;
+        case "game_start":
+            activeGameId = data.game_id;
+            gameState = data.state;
+            showGamePanel(data.game_type, data.state, data.players);
+            break;
+        case "game_update":
+            gameState = data.state;
+            updateGamePanel(data.game_type, data.state);
+            break;
+        case "game_prompt":
+            alert(`🎲 ${data.prompt}`);
             break;
     }
 }
@@ -1711,23 +1852,11 @@ function renderSingleMessage(msg){
         </div>
         <div class="meta">
             <span>${fmtTime(msg.timestamp)}</span>
-            <button class="tab" onclick="sendReaction('${msg.id}','👍')">👍</button>
-            <button class="tab" onclick="sendReaction('${msg.id}','❤️')">❤️</button>
-            <button class="tab" onclick="sendReaction('${msg.id}','😂')">😂</button>
-            ${mine ? `<button class="edit-btn" onclick="editMessage('${msg.id}')">✏️</button><button class="delete-btn" onclick="deleteMessage('${msg.id}')">🗑️</button>` : ''}
-            <div class="reactions" id="reactions-${msg.id}"></div>
+            ${mine ? `<button class="delete-btn" onclick="deleteMessage('${msg.id}')">🗑️</button>` : ''}
         </div>
     `;
     container.appendChild(wrap);
-    updateReactionUI(msg.id, msg.reactions || {});
     wrap.scrollIntoView({behavior:"smooth", block:"end"});
-}
-function updateMessageInUI(data){
-    const msgDiv = document.querySelector(`[data-message-id="${data.id}"]`);
-    if(msgDiv){
-        const textDiv = msgDiv.querySelector('.msg-text');
-        if(textDiv) textDiv.innerHTML = `${escapeHtml(data.message)} <span class="muted">(edited)</span>`;
-    }
 }
 function renderMessages(){
     const container = document.getElementById("chatMessages");
@@ -1739,14 +1868,6 @@ async function deleteMessage(msgId){
     const res = await fetch(`/message/${msgId}`, {method:"DELETE"});
     if(!res.ok) alert("Could not delete message.");
 }
-async function editMessage(msgId){
-    const newText = prompt("Edit your message:");
-    if(!newText || !newText.trim()) return;
-    const fd = new FormData();
-    fd.append("new_text", newText.trim());
-    const res = await fetch(`/message/${msgId}`, {method:"POST", body:fd});
-    if(!res.ok) alert("Could not edit message.");
-}
 function sendMessage(){
     const input = document.getElementById("messageInput");
     const text = input.value.trim();
@@ -1755,21 +1876,6 @@ function sendMessage(){
     else{ ws.send(JSON.stringify({text, channel: currentChannel})); }
     input.value = "";
     ws.send(JSON.stringify({typing:false, channel: currentChannel}));
-}
-function sendReaction(msgId, emoji){
-    if(ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({reaction:true, msg_id:msgId, emoji}));
-}
-function updateReactionUI(msgId, reactions){
-    const slot = document.getElementById(`reactions-${msgId}`);
-    if(!slot) return;
-    slot.innerHTML = "";
-    Object.entries(reactions).forEach(([emoji, users]) => {
-        const div = document.createElement("div");
-        div.className = "reaction";
-        div.innerText = `${emoji} ${users.length}`;
-        div.onclick = () => sendReaction(msgId, emoji);
-        slot.appendChild(div);
-    });
 }
 function renderUsers(users){
     const box = document.getElementById("usersList");
@@ -1910,6 +2016,113 @@ function toggleSound(){
     soundEnabled = !soundEnabled;
     showSystem("🔊", `Sound ${soundEnabled?'enabled':'disabled'}`);
 }
+
+// ---------- Games ----------
+function renderGamesList(){
+    const container = document.getElementById("gamesList");
+    container.innerHTML = `
+        <div class="game-card">
+            <h4>🎮 Tic-Tac-Toe</h4>
+            <p class="muted">Challenge another player</p>
+            <button class="game-option" onclick="startGame('tictactoe')">Play</button>
+        </div>
+        <div class="game-card">
+            <h4>✊ Rock-Paper-Scissors</h4>
+            <p class="muted">Quick match</p>
+            <button class="game-option" onclick="startGame('rps')">Play</button>
+        </div>
+        <div class="game-card">
+            <h4>🎲 Truth or Dare</h4>
+            <p class="muted">Random prompts</p>
+            <button class="game-option" onclick="startGame('truthdare')">Play</button>
+        </div>
+        <div class="game-card">
+            <h4>🔢 Number Guess</h4>
+            <p class="muted">Guess 1-100</p>
+            <button class="game-option" onclick="startGame('numberguess')">Play</button>
+        </div>
+    `;
+}
+function startGame(gameType){
+    const users = Array.from(document.querySelectorAll('#usersList .member')).map(el => {
+        const name = el.querySelector('div[style*="font-weight:700;"]')?.innerText;
+        return name;
+    }).filter(u => u && u !== username);
+    if(users.length === 0){
+        alert("No other users online to challenge.");
+        return;
+    }
+    const opponent = prompt(`Choose opponent:\n${users.join('\n')}`);
+    if(!opponent || !users.includes(opponent)) return;
+    ws.send(JSON.stringify({game:"challenge", game_type:gameType, opponent}));
+}
+function showGamePanel(type, state, players){
+    const panel = document.getElementById("activeGamePanel");
+    panel.style.display = "block";
+    panel.innerHTML = `<h3>${type.toUpperCase()}</h3>`;
+    if(type === "tictactoe"){
+        panel.innerHTML += `<div class="board" id="tttBoard"></div><div id="gameStatus"></div>`;
+        renderTicTacToe(state, players);
+    } else if(type === "rps"){
+        panel.innerHTML += `<div><button class="game-option" onclick="sendGameMove('rock')">🪨 Rock</button><button class="game-option" onclick="sendGameMove('paper')">📄 Paper</button><button class="game-option" onclick="sendGameMove('scissors')">✂️ Scissors</button></div><div id="gameStatus"></div>`;
+        updateGamePanel(type, state);
+    } else if(type === "truthdare"){
+        panel.innerHTML += `<div><button class="game-option" onclick="sendGameMove('truth')">Truth</button><button class="game-option" onclick="sendGameMove('dare')">Dare</button></div>`;
+    } else if(type === "numberguess"){
+        panel.innerHTML += `<div><input id="guessInput" type="number" min="1" max="100"><button class="game-option" onclick="submitGuess()">Guess</button></div><div id="guessFeedback"></div>`;
+    }
+}
+function renderTicTacToe(state, players){
+    const boardDiv = document.getElementById("tttBoard");
+    if(!boardDiv) return;
+    boardDiv.innerHTML = "";
+    state.board.forEach((cell, i) => {
+        const cellDiv = document.createElement("div");
+        cellDiv.className = "cell";
+        cellDiv.innerText = cell;
+        cellDiv.onclick = () => { if(state.turn === username && !state.winner) ws.send(JSON.stringify({game:"move", game_id:activeGameId, index:i})); };
+        boardDiv.appendChild(cellDiv);
+    });
+    const status = document.getElementById("gameStatus");
+    if(state.winner){
+        status.innerText = state.winner === "draw" ? "It's a draw!" : `${state.winner} wins!`;
+    } else {
+        status.innerText = `Turn: ${state.turn}`;
+    }
+}
+function updateGamePanel(type, state){
+    if(type === "tictactoe"){
+        renderTicTacToe(state);
+    } else if(type === "rps"){
+        const status = document.getElementById("gameStatus");
+        if(state.winner){
+            status.innerText = state.winner === "draw" ? "Draw!" : `${state.winner} wins!`;
+        } else {
+            status.innerText = `Waiting for moves...`;
+        }
+    } else if(type === "numberguess"){
+        const fb = document.getElementById("guessFeedback");
+        const guesses = state.guesses[username];
+        if(guesses){
+            fb.innerText = `Your guess ${guesses.guess}: ${guesses.hint}`;
+        }
+        if(state.winner){
+            fb.innerText = `${state.winner} guessed the number! It was ${state.secret}.`;
+        }
+    }
+}
+function sendGameMove(move){
+    ws.send(JSON.stringify({game:"move", game_id:activeGameId, move, choice:move}));
+}
+function submitGuess(){
+    const inp = document.getElementById("guessInput");
+    const val = parseInt(inp.value);
+    if(isNaN(val)) return;
+    ws.send(JSON.stringify({game:"move", game_id:activeGameId, guess:val}));
+    inp.value = "";
+}
+
+// Event listeners
 document.getElementById("sendPrivateMsgBtn").onclick = sendPrivateMessage;
 document.getElementById("privateMessageInput").addEventListener("keydown", e => { if(e.key==="Enter") sendPrivateMessage(); });
 document.getElementById("sendBtn").onclick = sendMessage;
@@ -1959,7 +2172,6 @@ document.getElementById("fileInput").addEventListener("change", async (e) => {
     if(!data.success) showSystem("Upload", "Upload failed");
     e.target.value = "";
 });
-// Add sound toggle button
 const heroDiv = document.querySelector('.hero .pill');
 if(heroDiv){
     const soundBtn = document.createElement('button');
